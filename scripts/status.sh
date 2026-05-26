@@ -26,7 +26,11 @@ else
   echo "  Encryption: disabled"
 fi
 if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
-  echo "  Telegram:   enabled (notify: ${TELEGRAM_NOTIFY_ON:-all})"
+  if [ "${TELEGRAM_API_URL}" != "https://api.telegram.org" ]; then
+    echo "  Telegram:   enabled (notify: ${TELEGRAM_NOTIFY_ON:-all}, custom API: ${TELEGRAM_API_URL})"
+  else
+    echo "  Telegram:   enabled (notify: ${TELEGRAM_NOTIFY_ON:-all})"
+  fi
 else
   echo "  Telegram:   disabled"
 fi

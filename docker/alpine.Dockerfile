@@ -43,6 +43,7 @@ ENV POSTGRES_DB="" \
     TELEGRAM_BOT_TOKEN="" \
     TELEGRAM_CHAT_ID="" \
     TELEGRAM_THREAD_ID="" \
+    TELEGRAM_API_URL="https://api.telegram.org" \
     PROJECT_NAME="" \
     BACKUP_ENCRYPTION_KEY="" \
     BACKUP_MIN_DISK_SPACE=100 \

@@ -154,11 +154,14 @@ send_to_telegram() {
     tar -czf "${send_file}" -C "$(dirname "${file}")" "$(basename "${file}")"
   fi
 
-  # Check file size against Telegram limit
+  # Check file size - only enforce limit for official API
   local file_size
   file_size=$(get_size_bytes "${send_file}")
-  if [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
-    echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit. Skipping upload." >&2
+
+  # Warn if using official API with large files
+  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
+    echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit." >&2
+    echo "💡 Hint: Set TELEGRAM_API_URL to your self-hosted Bot API server to send large files." >&2
     if [ -d "${file}" ]; then rm -f "${send_file}"; fi
     return 1
   fi
@@ -180,7 +183,7 @@ send_to_telegram() {
   fi
 
   local response
-  response=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+  response=$(curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
     "${curl_args[@]}")
 
   if echo "${response}" | grep -q '"ok":true'; then
@@ -208,7 +211,7 @@ send_telegram_message() {
     if [ -n "${TELEGRAM_THREAD_ID}" ]; then
       curl_args+=(-d "message_thread_id=${TELEGRAM_THREAD_ID}")
     fi
-    curl -s --fail -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+    curl -s --fail -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
       "${curl_args[@]}" > /dev/null 2>&1 || true
   fi
 }

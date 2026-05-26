@@ -70,8 +70,15 @@ if [ -n "${TELEGRAM_CHAT_ID_FILE}" ] && [ -r "${TELEGRAM_CHAT_ID_FILE}" ]; then
   export TELEGRAM_CHAT_ID="$(cat "${TELEGRAM_CHAT_ID_FILE}")"
 fi
 
+# Set Telegram API URL (default to official, allow custom self-hosted Bot API)
+export TELEGRAM_API_URL="${TELEGRAM_API_URL:-https://api.telegram.org}"
+
 if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
-  echo "✅ Telegram notifications enabled."
+  if [ "${TELEGRAM_API_URL}" != "https://api.telegram.org" ]; then
+    echo "✅ Telegram notifications enabled (custom API: ${TELEGRAM_API_URL})."
+  else
+    echo "✅ Telegram notifications enabled."
+  fi
 elif [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -z "${TELEGRAM_CHAT_ID}" ]; then
   echo "⚠️ TELEGRAM_BOT_TOKEN is set but TELEGRAM_CHAT_ID is missing. Telegram disabled." >&2
 elif [ -z "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
