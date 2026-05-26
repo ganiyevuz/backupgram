@@ -25,6 +25,8 @@ func ParseChatID(raw string) (tg.InputPeerClass, error) {
 	switch {
 	case id >= 0:
 		return &tg.InputPeerUser{UserID: id}, nil
+	// `<=` is safe: real supergroup/channel ids are always < -1000000000000,
+	// so the exact boundary (which would yield ChannelID 0) never occurs.
 	case id <= -1000000000000:
 		return &tg.InputPeerChannel{ChannelID: -id - 1000000000000}, nil
 	default:
