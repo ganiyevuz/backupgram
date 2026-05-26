@@ -35,9 +35,13 @@ func run(ctx context.Context) error {
 		return errors.New("--file and --chat are required")
 	}
 
-	apiID, err := strconv.Atoi(os.Getenv("TELEGRAM_API_ID"))
+	rawAPIID := os.Getenv("TELEGRAM_API_ID")
+	if rawAPIID == "" {
+		return errors.New("TELEGRAM_API_ID must be set")
+	}
+	apiID, err := strconv.Atoi(rawAPIID)
 	if err != nil {
-		return fmt.Errorf("invalid TELEGRAM_API_ID: %w", err)
+		return fmt.Errorf("invalid TELEGRAM_API_ID %q: %w", rawAPIID, err)
 	}
 	apiHash := os.Getenv("TELEGRAM_API_HASH")
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
@@ -71,11 +75,12 @@ func run(ctx context.Context) error {
 		}
 
 		api := tg.NewClient(client)
+		baseName := filepath.Base(*file)
 
 		inputFile, err := uploader.NewUploader(api).
 			WithThreads(4).
 			WithPartSize(512 * 1024).
-			Upload(ctx, uploader.NewUpload(filepath.Base(*file), f, stat.Size()))
+			Upload(ctx, uploader.NewUpload(baseName, f, stat.Size()))
 		if err != nil {
 			return fmt.Errorf("upload: %w", err)
 		}
@@ -85,13 +90,15 @@ func run(ctx context.Context) error {
 			docOpts = append(docOpts, styling.Plain(*caption))
 		}
 		doc := message.UploadedDocument(inputFile, docOpts...).
-			Filename(filepath.Base(*file)).
+			Filename(baseName).
 			ForceFile(true)
 
+		// gotd's RequestBuilder.To returns a *RequestBuilder; CloneBuilder is the
+		// intended way to obtain the *Builder that .Media is called on. The thread
+		// branch gets it via Reply (routing into a forum topic); both keep the peer.
 		requestBuilder := message.NewSender(api).To(peer)
 		var sender *message.Builder
 		if *thread != 0 {
-			// Replying to a forum topic's root message id routes the message into that topic.
 			sender = requestBuilder.Reply(*thread)
 		} else {
 			sender = requestBuilder.CloneBuilder()
