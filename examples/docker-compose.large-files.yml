@@ -1,0 +1,57 @@
+services:
+  # Telegram Bot API Server (supports files up to 2GB)
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    environment:
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"           # Get from https://my.telegram.org
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"       # Get from https://my.telegram.org
+      TELEGRAM_LOCAL: "true"
+    ports:
+      - "8081:8081"
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  backup:
+    image: ganiyevuz/postgres-backup-telegram:17
+    depends_on:
+      - postgres
+      - telegram-bot-api
+    environment:
+      # PostgreSQL connection
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+
+      # Backup schedule and retention
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: 7
+      BACKUP_KEEP_WEEKS: 4
+      BACKUP_KEEP_MONTHS: 6
+
+      # Telegram settings (using local Bot API server)
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
+      TELEGRAM_API_URL: "http://telegram-bot-api:8081"  # Self-hosted Bot API (supports 2GB files)
+      TELEGRAM_NOTIFY_ON: "all"
+
+      PROJECT_NAME: "Production Database"
+    volumes:
+      - backup-data:/backups
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  backup-data:
+  telegram-bot-api-data:
