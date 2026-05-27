@@ -9,28 +9,65 @@ import (
 	"github.com/gotd/td/telegram/uploader"
 )
 
-// progressLogger logs upload progress to stderr in whole lines suitable for
-// container logs. gotd fires Chunk once per uploaded part (thousands of times
-// for a multi-GB file), so output is throttled to one line per 10% crossed
-// rather than a carriage-return progress bar, which `docker logs` would garble.
+// progressLogger reports upload progress to stderr. gotd fires Chunk once per
+// uploaded part (thousands of times for a multi-GB file), so output is
+// throttled. Behaviour is terminal-aware:
+//   - interactive (stderr is a TTY): a single in-place bar redrawn with \r,
+//     updated on every 1% change.
+//   - non-interactive (cron → `docker logs`): one full, newline-terminated
+//     line per 10% crossed, since `docker logs` cannot process \r.
 type progressLogger struct {
-	lastStep int // highest 10%-bucket already logged (0 = none yet)
+	tty     bool
+	lastPct int // last percentage acted on (-1 = none yet)
+}
+
+// newProgressLogger detects whether stderr is a terminal (a character device)
+// and configures the output mode accordingly. No external dependency needed.
+func newProgressLogger() *progressLogger {
+	fi, err := os.Stderr.Stat()
+	tty := err == nil && fi.Mode()&os.ModeCharDevice != 0
+	return &progressLogger{tty: tty, lastPct: -1}
 }
 
 // Chunk implements uploader.Progress.
 func (p *progressLogger) Chunk(_ context.Context, s uploader.ProgressState) error {
+	if line, ok := p.next(s); ok {
+		fmt.Fprint(os.Stderr, line)
+	}
+	return nil
+}
+
+// next decides what (if anything) to emit for the given upload state. It
+// returns the exact string to write and ok=true, or ok=false when this update
+// is throttled away. Kept separate from I/O so it can be unit-tested.
+func (p *progressLogger) next(s uploader.ProgressState) (string, bool) {
 	if s.Total <= 0 {
-		return nil // unknown size (streamed upload) — nothing meaningful to show
+		return "", false // unknown size (streamed upload) — nothing meaningful to show
 	}
 	pct := int(s.Uploaded * 100 / s.Total)
-	step := pct / 10
-	if step <= p.lastStep {
-		return nil
+	bar := progressBar(pct, 20)
+
+	if p.tty {
+		if pct == p.lastPct {
+			return "", false
+		}
+		p.lastPct = pct
+		// \r returns to column 0; \033[K erases stale chars from a longer prior line.
+		line := fmt.Sprintf("\rtg-upload: %s [%s] %3d%% (%s / %s)\033[K",
+			s.Name, bar, pct, humanBytes(s.Uploaded), humanBytes(s.Total))
+		if pct >= 100 {
+			line += "\n" // finish the line once complete
+		}
+		return line, true
 	}
-	p.lastStep = step
-	fmt.Fprintf(os.Stderr, "tg-upload: %s [%s] %3d%% (%s / %s)\n",
-		s.Name, progressBar(pct, 20), pct, humanBytes(s.Uploaded), humanBytes(s.Total))
-	return nil
+
+	// Non-TTY: emit only when a new 10% bucket is reached.
+	if pct/10 <= p.lastPct/10 {
+		return "", false
+	}
+	p.lastPct = pct
+	return fmt.Sprintf("tg-upload: %s [%s] %3d%% (%s / %s)\n",
+		s.Name, bar, pct, humanBytes(s.Uploaded), humanBytes(s.Total)), true
 }
 
 // progressBar renders a fixed-width textual bar, e.g. "████████░░░░░░░░░░░░".
