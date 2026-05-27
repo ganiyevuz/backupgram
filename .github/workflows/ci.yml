@@ -14,6 +14,20 @@ on:
       - '.github/**'
 
 jobs:
+  test-go:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: tg-upload/go.sum
+      - name: Vet and test the MTProto uploader
+        working-directory: tg-upload
+        run: |
+          go vet ./...
+          go test ./...
+
   test-script:
     runs-on: ubuntu-22.04
     services:
@@ -59,6 +73,8 @@ jobs:
       TELEGRAM_BOT_TOKEN_FILE: ""
       TELEGRAM_CHAT_ID_FILE: ""
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_THREAD_ID: ""
       TELEGRAM_NOTIFY_ON: "all"
@@ -119,6 +135,13 @@ jobs:
           GPG_COUNT=$(find "$BACKUP_DIR/last" -name "*.gpg" | wc -l)
           test "$GPG_COUNT" -gt 0 || (echo "No encrypted backup found" && exit 1)
 
+      - name: Test MTProto large-file upload (gated on secrets)
+        if: ${{ env.TELEGRAM_API_ID != '' }}
+        run: |
+          go build -C tg-upload -o /usr/local/bin/tg-upload .
+          head -c 60000000 /dev/urandom > /tmp/big.bin
+          tg-upload --file /tmp/big.bin --chat "$TELEGRAM_CHAT_ID" --caption "CI MTProto test"
+
       - name: Test list command
         run: |
           bash scripts/list.sh
@@ -149,7 +172,7 @@ jobs:
 
   test-docker:
     if: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
-    needs: [ test-script ]
+    needs: [ test-script, test-go ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -165,7 +188,7 @@ jobs:
 
   publish:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [ test-script ]
+    needs: [ test-script, test-go ]
     runs-on: ubuntu-22.04
     environment: docker.io
     steps:
