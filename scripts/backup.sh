@@ -58,8 +58,9 @@ TELEGRAM_NOTIFY_ON="${TELEGRAM_NOTIFY_ON:-all}"
 # Initialize directories
 mkdir -p "${BACKUP_DIR}/last/" "${BACKUP_DIR}/daily/" "${BACKUP_DIR}/weekly/" "${BACKUP_DIR}/monthly/"
 
-# Telegram file size limit (50MB in bytes)
+# Telegram file size limit (50MB in bytes) and the bot MTProto ceiling (2GB)
 TELEGRAM_MAX_SIZE=52428800
+TELEGRAM_MTPROTO_MAX_SIZE=2147483648
 
 # Get human-readable size of a file or directory
 get_size() {
@@ -154,24 +155,46 @@ send_to_telegram() {
     tar -czf "${send_file}" -C "$(dirname "${file}")" "$(basename "${file}")"
   fi
 
-  # Check file size - only enforce limit for official API
+  # Check file size
   local file_size
   file_size=$(get_size_bytes "${send_file}")
 
-  # Warn if using official API with large files
-  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
-    echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit." >&2
-    echo "💡 Hint: Set TELEGRAM_API_URL to your self-hosted Bot API server to send large files." >&2
-    if [ -d "${file}" ]; then rm -f "${send_file}"; fi
-    return 1
-  fi
-
-  # Build caption with optional project name
+  # Build caption with optional project name (used by both the curl and MTProto paths)
   local caption="📂 PostgreSQL Backup"
   if [ -n "${PROJECT_NAME}" ]; then
     caption="${caption} [${PROJECT_NAME}]"
   fi
   caption="${caption}: ${db} ($(date +'%Y-%m-%d %H:%M:%S')) [$(get_size "${send_file}")]"
+
+  # Large-file handling: the official Bot API caps uploads at 50MB.
+  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
+    # Above the bot MTProto ceiling there is nothing we can do — keep it locally.
+    if [ "${file_size}" -gt "${TELEGRAM_MTPROTO_MAX_SIZE}" ]; then
+      echo "⚠️ Backup $(get_size "${send_file}") exceeds the 2GB MTProto limit. Kept locally." >&2
+      if [ -d "${file}" ]; then rm -f "${send_file}"; fi
+      return 1
+    fi
+    # Prefer the vendored MTProto uploader when credentials are configured.
+    if [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ] && command -v tg-upload >/dev/null 2>&1; then
+      echo "⬆️ Backup exceeds 50MB — uploading via MTProto (up to 2GB)..."
+      local tg_args=(--file "${send_file}" --chat "${TELEGRAM_CHAT_ID}" --caption "${caption}")
+      if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+        tg_args+=(--thread "${TELEGRAM_THREAD_ID}")
+      fi
+      if tg-upload "${tg_args[@]}"; then
+        echo "✅ Backup sent to Telegram (MTProto)."
+      else
+        echo "⚠️ MTProto upload failed. Backup is still saved locally." >&2
+      fi
+      if [ -d "${file}" ]; then rm -f "${send_file}"; fi
+      return 0
+    fi
+    # No MTProto creds and not on a self-hosted server — cannot send.
+    echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit." >&2
+    echo "💡 Hint: set TELEGRAM_API_ID + TELEGRAM_API_HASH to send via MTProto (up to 2GB), or set TELEGRAM_API_URL to a self-hosted Bot API server." >&2
+    if [ -d "${file}" ]; then rm -f "${send_file}"; fi
+    return 1
+  fi
 
   # Build curl args with optional thread support
   local curl_args=()
