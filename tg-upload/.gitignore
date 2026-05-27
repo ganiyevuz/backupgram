@@ -1,3 +1,8 @@
 /tgupload
 /tg-upload
+/upload
 /out
+
+# Local test artifacts (sample media for manual upload testing)
+*.mov
+*.mp4
