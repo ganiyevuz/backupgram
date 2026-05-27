@@ -99,13 +99,15 @@ Docker secrets alternatives: `POSTGRES_USER_FILE`, `POSTGRES_PASSWORD_FILE`, `PO
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | | Bot token from [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | | Chat ID (get it from [@userinfobot](https://t.me/userinfobot)) |
+| `TELEGRAM_API_ID` | `""` | Telegram app `api_id` ([my.telegram.org](https://my.telegram.org/apps)). Enables built-in MTProto upload of backups up to 2 GB |
+| `TELEGRAM_API_HASH` | `""` | Telegram app `api_hash`. Required together with `TELEGRAM_API_ID` |
 | `TELEGRAM_THREAD_ID` | `""` | Message thread ID for supergroup topics |
 | `TELEGRAM_NOTIFY_ON` | `all` | When to send notifications: `all`, `failure`, `success`, `none` |
 | `PROJECT_NAME` | `""` | Label included in Telegram captions and alerts |
 
-Docker secrets alternatives: `TELEGRAM_BOT_TOKEN_FILE`, `TELEGRAM_CHAT_ID_FILE`.
+Docker secrets alternatives: `TELEGRAM_BOT_TOKEN_FILE`, `TELEGRAM_CHAT_ID_FILE`, `TELEGRAM_API_ID_FILE`, `TELEGRAM_API_HASH_FILE`.
 
-Backup files under 50 MB are sent as documents to the configured chat. Files exceeding the Telegram limit are reported with a text alert instead.
+Backup files under 50 MB are sent as documents via the Bot API. Larger files (up to 2 GB) are uploaded over MTProto by the bundled `tg-upload` binary when `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are set; otherwise they are reported with a text alert. See [docs/LARGE_FILES.md](docs/LARGE_FILES.md).
 
 ### Webhooks
 
