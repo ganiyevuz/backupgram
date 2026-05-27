@@ -80,6 +80,7 @@ func run(ctx context.Context) error {
 		inputFile, err := uploader.NewUploader(api).
 			WithThreads(4).
 			WithPartSize(512 * 1024).
+			WithProgress(&progressLogger{}).
 			Upload(ctx, uploader.NewUpload(baseName, f, stat.Size()))
 		if err != nil {
 			return fmt.Errorf("upload: %w", err)
