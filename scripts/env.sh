@@ -69,6 +69,19 @@ if [ -n "${TELEGRAM_CHAT_ID_FILE}" ] && [ -r "${TELEGRAM_CHAT_ID_FILE}" ]; then
   # shellcheck disable=SC2155
   export TELEGRAM_CHAT_ID="$(cat "${TELEGRAM_CHAT_ID_FILE}")"
 fi
+# MTProto large-file upload credentials (optional, from https://my.telegram.org/apps)
+if [ -n "${TELEGRAM_API_ID_FILE}" ] && [ -r "${TELEGRAM_API_ID_FILE}" ]; then
+  # shellcheck disable=SC2155
+  export TELEGRAM_API_ID="$(cat "${TELEGRAM_API_ID_FILE}")"
+fi
+if [ -n "${TELEGRAM_API_HASH_FILE}" ] && [ -r "${TELEGRAM_API_HASH_FILE}" ]; then
+  # shellcheck disable=SC2155
+  export TELEGRAM_API_HASH="$(cat "${TELEGRAM_API_HASH_FILE}")"
+fi
+
+if [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ]; then
+  echo "✅ Large-file upload enabled (MTProto, up to 2GB)."
+fi
 
 # Set Telegram API URL (default to official, allow custom self-hosted Bot API)
 export TELEGRAM_API_URL="${TELEGRAM_API_URL:-https://api.telegram.org}"
