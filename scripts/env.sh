@@ -83,6 +83,23 @@ if [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ]; then
   echo "✅ Large-file upload enabled (MTProto, up to 2GB)."
 fi
 
+# Upload method selector: smart (auto by size) | botapi (Bot API only) | mtproto (binary only).
+TELEGRAM_UPLOAD_METHOD="$(echo "${TELEGRAM_UPLOAD_METHOD:-smart}" | tr '[:upper:]' '[:lower:]')"
+case "${TELEGRAM_UPLOAD_METHOD}" in
+  smart | botapi) ;;
+  mtproto)
+    if [ -z "${TELEGRAM_API_ID}" ] || [ -z "${TELEGRAM_API_HASH}" ]; then
+      echo "❌ TELEGRAM_UPLOAD_METHOD=mtproto requires TELEGRAM_API_ID and TELEGRAM_API_HASH." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "❌ TELEGRAM_UPLOAD_METHOD must be one of: smart, botapi, mtproto (got '${TELEGRAM_UPLOAD_METHOD}')." >&2
+    exit 1
+    ;;
+esac
+export TELEGRAM_UPLOAD_METHOD
+
 # Set Telegram API URL (default to official, allow custom self-hosted Bot API)
 export TELEGRAM_API_URL="${TELEGRAM_API_URL:-https://api.telegram.org}"
 
