@@ -98,10 +98,10 @@ Docker secrets alternatives: `POSTGRES_USER_FILE`, `POSTGRES_PASSWORD_FILE`, `PO
 | Variable | Default | Description |
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | | Bot token from [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_CHAT_ID` | | Chat ID (get it from [@userinfobot](https://t.me/userinfobot)) |
+| `TELEGRAM_CHAT_ID` | | Chat ID(s) — comma-separated for multiple destinations (get it from [@userinfobot](https://t.me/userinfobot)) |
 | `TELEGRAM_API_ID` | `""` | Telegram app `api_id` ([my.telegram.org](https://my.telegram.org/apps)). Enables built-in MTProto upload of backups up to 2 GB |
 | `TELEGRAM_API_HASH` | `""` | Telegram app `api_hash`. Required together with `TELEGRAM_API_ID` |
-| `TELEGRAM_THREAD_ID` | `""` | Message thread ID for supergroup topics |
+| `TELEGRAM_THREAD_ID` | `""` | Message thread ID for supergroup topics (applied only when a single chat is configured) |
 | `TELEGRAM_UPLOAD_METHOD` | `smart` | Backup-file transport: `smart` (auto by size), `botapi` (always Bot API via `curl`), or `mtproto` (always the bundled binary; requires `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`) |
 | `TELEGRAM_NOTIFY_ON` | `all` | When to send notifications: `all`, `failure`, `success`, `none` |
 | `PROJECT_NAME` | `""` | Label included in Telegram captions and alerts |

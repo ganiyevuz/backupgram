@@ -16,6 +16,8 @@ See [`examples/docker-compose.large-files-mtproto.yml`](../examples/docker-compo
 
 **Targets:** the bot must be a member of the destination. Supergroups/channels (`-100…` ids) and basic groups work. Sending to an individual user requires that user to have started the bot.
 
+**Multiple chats:** `TELEGRAM_CHAT_ID` accepts a comma-separated list (e.g. `-1001111111111,12345678`). The backup is uploaded once and delivered to every chat (`file_id` reuse for ≤50 MB, a single MTProto upload reused for larger files). `TELEGRAM_THREAD_ID` is honoured only when exactly one chat is configured.
+
 `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` also support Docker secrets via `TELEGRAM_API_ID_FILE` / `TELEGRAM_API_HASH_FILE`.
 
 ## Route B — Self-hosted Bot API server
