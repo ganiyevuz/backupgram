@@ -216,25 +216,49 @@ send_to_telegram() {
     return 1
   fi
 
-  # Build curl args with optional thread support
-  local curl_args=()
-  curl_args+=(-F "chat_id=${TELEGRAM_CHAT_ID}")
-  curl_args+=(-F "document=@${send_file}")
-  curl_args+=(-F "caption=${caption}")
-  if [ -n "${TELEGRAM_THREAD_ID}" ]; then
-    curl_args+=(-F "message_thread_id=${TELEGRAM_THREAD_ID}")
-  fi
+  # Fan out to every configured chat. Upload to the first chat, then reuse the
+  # returned file_id for the rest (no re-upload). Falls back to re-uploading if
+  # the first send fails to yield a file_id.
+  local chat_ids
+  read -ra chat_ids <<< "${TELEGRAM_CHAT_IDS:-${TELEGRAM_CHAT_ID}}"
+  local single_chat="false"
+  if [ "${#chat_ids[@]}" -le 1 ]; then single_chat="true"; fi
 
-  local response
-  response=$(curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-    "${curl_args[@]}")
+  local file_id=""
+  local sent=0
+  local chat_id
+  for chat_id in "${chat_ids[@]}"; do
+    local curl_args=()
+    curl_args+=(-F "chat_id=${chat_id}")
+    if [ -n "${file_id}" ]; then
+      curl_args+=(-F "document=${file_id}")
+    else
+      curl_args+=(-F "document=@${send_file}")
+    fi
+    curl_args+=(-F "caption=${caption}")
+    if [ "${single_chat}" = "true" ] && [ -n "${TELEGRAM_THREAD_ID}" ]; then
+      curl_args+=(-F "message_thread_id=${TELEGRAM_THREAD_ID}")
+    fi
 
-  if echo "${response}" | grep -q '"ok":true'; then
-    echo "✅ Backup sent to Telegram."
-  else
-    local error_desc
-    error_desc=$(echo "${response}" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
-    echo "⚠️ Failed to send backup to Telegram: ${error_desc:-unknown error}. Backup is still saved locally." >&2
+    local response
+    response=$(curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+      "${curl_args[@]}")
+
+    if echo "${response}" | grep -q '"ok":true'; then
+      sent=$((sent + 1))
+      echo "✅ Backup sent to Telegram chat ${chat_id}."
+      if [ -z "${file_id}" ]; then
+        file_id=$(echo "${response}" | grep -o '"file_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+      fi
+    else
+      local error_desc
+      error_desc=$(echo "${response}" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
+      echo "⚠️ Failed to send backup to Telegram chat ${chat_id}: ${error_desc:-unknown error}." >&2
+    fi
+  done
+
+  if [ "${sent}" -eq 0 ]; then
+    echo "⚠️ Backup not delivered to any chat. It is still saved locally." >&2
   fi
 
   # Clean up temporary tar archive
@@ -246,17 +270,25 @@ send_to_telegram() {
 # Send a text message to Telegram
 send_telegram_message() {
   local message="$1"
-  if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+  if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+    return 0
+  fi
+  local chat_ids
+  read -ra chat_ids <<< "${TELEGRAM_CHAT_IDS:-${TELEGRAM_CHAT_ID}}"
+  local single_chat="false"
+  if [ "${#chat_ids[@]}" -le 1 ]; then single_chat="true"; fi
+  local chat_id
+  for chat_id in "${chat_ids[@]}"; do
     local curl_args=()
-    curl_args+=(-d "chat_id=${TELEGRAM_CHAT_ID}")
+    curl_args+=(-d "chat_id=${chat_id}")
     curl_args+=(-d "text=${message}")
     curl_args+=(-d "parse_mode=Markdown")
-    if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+    if [ "${single_chat}" = "true" ] && [ -n "${TELEGRAM_THREAD_ID}" ]; then
       curl_args+=(-d "message_thread_id=${TELEGRAM_THREAD_ID}")
     fi
     curl -s --fail -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
       "${curl_args[@]}" > /dev/null 2>&1 || true
-  fi
+  done
 }
 
 # Track backup results
