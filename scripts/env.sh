@@ -100,6 +100,19 @@ case "${TELEGRAM_UPLOAD_METHOD}" in
 esac
 export TELEGRAM_UPLOAD_METHOD
 
+# Split comma-separated chat ids into a space-separated list for fan-out delivery.
+TELEGRAM_CHAT_IDS="${TELEGRAM_CHAT_ID//,/ }"
+
+# A forum-topic id is valid only within one supergroup, so warn that it is
+# ignored when delivering to multiple chats.
+if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+  read -ra _chat_id_arr <<< "${TELEGRAM_CHAT_IDS}"
+  if [ "${#_chat_id_arr[@]}" -gt 1 ]; then
+    echo "⚠️ Multiple chat ids set — TELEGRAM_THREAD_ID will be ignored (topic ids are per-supergroup)." >&2
+  fi
+  unset _chat_id_arr
+fi
+
 # Set Telegram API URL (default to official, allow custom self-hosted Bot API)
 export TELEGRAM_API_URL="${TELEGRAM_API_URL:-https://api.telegram.org}"
 
