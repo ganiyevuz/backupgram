@@ -24,6 +24,16 @@ Run the official `telegram-bot-api` daemon as a sidecar and point `TELEGRAM_API_
 
 See [`examples/docker-compose.large-files.yml`](../examples/docker-compose.large-files.yml).
 
+## Forcing a transport with `TELEGRAM_UPLOAD_METHOD`
+
+By default delivery is `smart` — it picks the transport automatically by file size and configuration. Set `TELEGRAM_UPLOAD_METHOD` to force one:
+
+- `smart` (default) — ≤50 MB via the Bot API; larger files via a self-hosted server (if `TELEGRAM_API_URL` is custom) or MTProto (if `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` are set).
+- `botapi` — always the Bot API (`curl`) against `TELEGRAM_API_URL`. On the official API, files >50 MB are kept locally with a warning (never silently switched to MTProto).
+- `mtproto` — always the bundled `tg-upload` binary, for files of any size. Requires `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` (validated at startup).
+
+An explicitly chosen method is never silently overridden; if it cannot deliver a file, the backup is kept locally and the run continues.
+
 ## Which to choose?
 
 | | Route A (MTProto binary) | Route B (self-hosted server) |
