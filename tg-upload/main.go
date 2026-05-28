@@ -49,7 +49,7 @@ func run(ctx context.Context) error {
 		return errors.New("TELEGRAM_API_HASH and TELEGRAM_BOT_TOKEN must be set")
 	}
 
-	peer, err := ParseChatID(*chat)
+	targets, err := splitChats(*chat)
 	if err != nil {
 		return err
 	}
@@ -90,22 +90,35 @@ func run(ctx context.Context) error {
 		if *caption != "" {
 			docOpts = append(docOpts, styling.Plain(*caption))
 		}
-		doc := message.UploadedDocument(inputFile, docOpts...).
-			Filename(baseName).
-			ForceFile(true)
 
-		// gotd's RequestBuilder.To returns a *RequestBuilder; CloneBuilder is the
-		// intended way to obtain the *Builder that .Media is called on. The thread
-		// branch gets it via Reply (routing into a forum topic); both keep the peer.
-		requestBuilder := message.NewSender(api).To(peer)
-		var sender *message.Builder
-		if *thread != 0 {
-			sender = requestBuilder.Reply(*thread)
-		} else {
-			sender = requestBuilder.CloneBuilder()
+		sender := message.NewSender(api)
+		// A forum-topic id is valid only within one supergroup, so honour --thread
+		// only when sending to a single chat.
+		useThread := *thread != 0 && len(targets) == 1
+
+		sent := 0
+		for _, t := range targets {
+			// gotd's RequestBuilder.To returns a *RequestBuilder; CloneBuilder
+			// yields the *Builder that .Media needs (Reply does too, for a topic).
+			rb := sender.To(t.peer)
+			var b *message.Builder
+			if useThread {
+				b = rb.Reply(*thread)
+			} else {
+				b = rb.CloneBuilder()
+			}
+			doc := message.UploadedDocument(inputFile, docOpts...).
+				Filename(baseName).
+				ForceFile(true)
+			if _, err := b.Media(ctx, doc); err != nil {
+				fmt.Fprintf(os.Stderr, "tg-upload: ⚠️ failed to send to %s: %v\n", t.raw, err)
+				continue
+			}
+			sent++
+			fmt.Fprintf(os.Stderr, "tg-upload: ✅ sent to %s\n", t.raw)
 		}
-		if _, err := sender.Media(ctx, doc); err != nil {
-			return fmt.Errorf("send: %w", err)
+		if sent == 0 {
+			return fmt.Errorf("upload succeeded but all %d send(s) failed", len(targets))
 		}
 		return nil
 	})
