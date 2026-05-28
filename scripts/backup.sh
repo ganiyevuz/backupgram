@@ -142,6 +142,23 @@ verify_backup() {
   return 0
 }
 
+# Send the prepared upload file to Telegram via the MTProto binary (tg-upload).
+# Args: <upload_file> <caption> <original_file>. Delivery failure is non-fatal;
+# cleans up a directory tar archive afterward.
+mtproto_send() {
+  local upload_file="$1" cap="$2" orig="$3"
+  local tg_args=(--file "${upload_file}" --chat "${TELEGRAM_CHAT_ID}" --caption "${cap}")
+  if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+    tg_args+=(--thread "${TELEGRAM_THREAD_ID}")
+  fi
+  if tg-upload "${tg_args[@]}"; then
+    echo "✅ Backup sent to Telegram (MTProto)."
+  else
+    echo "⚠️ MTProto upload failed. Backup is still saved locally." >&2
+  fi
+  if [ -d "${orig}" ]; then rm -f "${upload_file}"; fi
+}
+
 # Send a file to Telegram with size validation
 send_to_telegram() {
   local file="$1"
@@ -166,32 +183,35 @@ send_to_telegram() {
   fi
   caption="${caption}: ${db} ($(date +'%Y-%m-%d %H:%M:%S')) [$(get_size "${send_file}")]"
 
-  # Large-file handling: the official Bot API caps uploads at 50MB.
-  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
-    # Above the bot MTProto ceiling there is nothing we can do — keep it locally.
+  local method="${TELEGRAM_UPLOAD_METHOD:-smart}"
+
+  # mtproto mode: deliver every file via the MTProto binary, regardless of size.
+  if [ "${method}" = "mtproto" ]; then
     if [ "${file_size}" -gt "${TELEGRAM_MTPROTO_MAX_SIZE}" ]; then
       echo "⚠️ Backup $(get_size "${send_file}") exceeds the 2GB MTProto limit. Kept locally." >&2
       if [ -d "${file}" ]; then rm -f "${send_file}"; fi
       return 1
     fi
-    # Prefer the vendored MTProto uploader when credentials are configured.
-    if [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ] && command -v tg-upload >/dev/null 2>&1; then
+    echo "⬆️ Uploading via MTProto (TELEGRAM_UPLOAD_METHOD=mtproto)..."
+    mtproto_send "${send_file}" "${caption}" "${file}"
+    return 0
+  fi
+
+  # Official Bot API caps uploads at 50MB. In smart mode an oversize file may be
+  # routed to MTProto; in botapi mode it never is.
+  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
+    if [ "${method}" = "smart" ] \
+       && [ "${file_size}" -le "${TELEGRAM_MTPROTO_MAX_SIZE}" ] \
+       && [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ] \
+       && command -v tg-upload >/dev/null 2>&1; then
       echo "⬆️ Backup exceeds 50MB — uploading via MTProto (up to 2GB)..."
-      local tg_args=(--file "${send_file}" --chat "${TELEGRAM_CHAT_ID}" --caption "${caption}")
-      if [ -n "${TELEGRAM_THREAD_ID}" ]; then
-        tg_args+=(--thread "${TELEGRAM_THREAD_ID}")
-      fi
-      if tg-upload "${tg_args[@]}"; then
-        echo "✅ Backup sent to Telegram (MTProto)."
-      else
-        echo "⚠️ MTProto upload failed. Backup is still saved locally." >&2
-      fi
-      if [ -d "${file}" ]; then rm -f "${send_file}"; fi
+      mtproto_send "${send_file}" "${caption}" "${file}"
       return 0
     fi
-    # No MTProto creds and not on a self-hosted server — cannot send.
     echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit." >&2
-    echo "💡 Hint: set TELEGRAM_API_ID + TELEGRAM_API_HASH to send via MTProto (up to 2GB), or set TELEGRAM_API_URL to a self-hosted Bot API server." >&2
+    if [ "${method}" = "smart" ]; then
+      echo "💡 Hint: set TELEGRAM_API_ID + TELEGRAM_API_HASH to send via MTProto (up to 2GB), or set TELEGRAM_API_URL to a self-hosted Bot API server." >&2
+    fi
     if [ -d "${file}" ]; then rm -f "${send_file}"; fi
     return 1
   fi
