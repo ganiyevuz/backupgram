@@ -44,3 +44,13 @@ An explicitly chosen method is never silently overridden; if it cannot deliver a
 | Max size | 2 GB | 2 GB |
 | Needs `api_id`/`api_hash` | yes | yes |
 | Best for | most users | those already running a Bot API server |
+
+## Disaster recovery: restoring from Telegram
+
+Every backup message's caption includes its own restore id, e.g. `🔖 Restore ID: 4521`. If the `BACKUP_DIR` volume is lost, you can restore straight from Telegram:
+
+```sh
+docker exec -it my-backup restore --from-telegram 4521 [--chat <chat_id>] [target_db]
+```
+
+`tg-upload` downloads the document for that message over MTProto (preserving the original filename, so GPG/format detection works), and the file is then restored through the normal pipeline. For multi-chat delivery, message ids are per-chat — read the id from the caption in the chat you intend to restore from, and pass `--chat` if it is not the first configured chat.

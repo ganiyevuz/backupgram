@@ -173,6 +173,18 @@ docker exec -it my-backup restore /backups/last/mydb-latest.sql.gz
 docker exec -it my-backup restore /backups/daily/mydb-20260416.sql.gz mydb_staging
 ```
 
+**Restore from Telegram** (disaster recovery — when local backups are gone):
+
+```sh
+# The restore id is shown in each backup message's caption: "🔖 Restore ID: 4521"
+docker exec -it my-backup restore --from-telegram 4521
+
+# Pick a specific chat (for multi-chat delivery) and/or target database
+docker exec -it my-backup restore --from-telegram 4521 --chat -1001234567890 mydb_restored
+```
+
+Requires `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` / `TELEGRAM_BOT_TOKEN`. The backup is downloaded over MTProto (up to 2 GB), then restored through the normal decrypt/auto-detect pipeline.
+
 Interactive mode output:
 
 ```
