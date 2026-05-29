@@ -59,3 +59,9 @@ func TestDocumentFromMessagesErrors(t *testing.T) {
 		t.Error("expected error for empty message list")
 	}
 }
+
+func TestRestoreIDLine(t *testing.T) {
+	if got := restoreIDLine(4521); got != "🔖 Restore ID: 4521" {
+		t.Errorf("restoreIDLine(4521) = %q", got)
+	}
+}

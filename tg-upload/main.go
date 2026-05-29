@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-
-	"github.com/gotd/td/tg"
 )
 
 func main() {
@@ -24,6 +22,3 @@ func run(ctx context.Context, args []string) error {
 	return runUpload(ctx, args)
 }
 
-// editCaptionAfterSend is implemented in caption.go (a later task). Temporary stub.
-func editCaptionAfterSend(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, upd tg.UpdatesClass, caption string) {
-}
