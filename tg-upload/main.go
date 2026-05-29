@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 
@@ -27,9 +26,4 @@ func run(ctx context.Context, args []string) error {
 
 // editCaptionAfterSend is implemented in caption.go (a later task). Temporary stub.
 func editCaptionAfterSend(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, upd tg.UpdatesClass, caption string) {
-}
-
-// runDownload is implemented in download.go (a later task). Temporary stub.
-func runDownload(ctx context.Context, args []string) error {
-	return errors.New("download: not implemented")
 }
