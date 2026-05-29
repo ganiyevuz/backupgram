@@ -11,6 +11,63 @@ set -Eeo pipefail
 source "$(dirname "$0")/env.sh"
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
+
+# --- Restore directly from Telegram by message id ---
+# Usage: restore --from-telegram <message_id> [--chat <chat_id>] [target_db]
+if [ "$1" = "--from-telegram" ]; then
+  TG_MESSAGE_ID="$2"
+
+  if [ -z "${TG_MESSAGE_ID}" ]; then
+    echo "❌ Usage: restore --from-telegram <message_id> [--chat <chat_id>] [target_db]" >&2
+    exit 1
+  fi
+
+  shift 2
+  TG_CHAT=""
+  if [ "$1" = "--chat" ]; then
+    TG_CHAT="$2"
+    shift 2
+  fi
+  TARGET_DB="$1"
+  if [ -z "${TELEGRAM_API_ID}" ] || [ -z "${TELEGRAM_API_HASH}" ] || [ -z "${TELEGRAM_BOT_TOKEN}" ]; then
+    echo "❌ Restore from Telegram requires TELEGRAM_API_ID, TELEGRAM_API_HASH, and TELEGRAM_BOT_TOKEN." >&2
+    exit 1
+  fi
+  if ! command -v tg-upload >/dev/null 2>&1; then
+    echo "❌ tg-upload binary not found; cannot download from Telegram." >&2
+    exit 1
+  fi
+
+  # Default to the first configured chat (message ids are per-chat).
+  if [ -z "${TG_CHAT}" ]; then
+    read -ra _rft_chats <<< "${TELEGRAM_CHAT_IDS:-${TELEGRAM_CHAT_ID}}"
+    TG_CHAT="${_rft_chats[0]}"
+  fi
+  if [ -z "${TG_CHAT}" ]; then
+    echo "❌ No chat id available; set TELEGRAM_CHAT_ID or pass --chat." >&2
+    exit 1
+  fi
+
+  TG_TMPDIR=$(mktemp -d)
+  trap 'rm -rf "${TG_TMPDIR}"' EXIT
+  echo "⬇️ Downloading backup from Telegram (message ${TG_MESSAGE_ID}, chat ${TG_CHAT})..."
+  # Capture inside the `if` condition: under `set -e` a bare `VAR=$(failing-cmd)`
+  # assignment would abort before our friendly check runs; `if` conditions are exempt.
+  if ! DOWNLOADED=$(tg-upload download --chat "${TG_CHAT}" --message "${TG_MESSAGE_ID}" --out "${TG_TMPDIR}"); then
+    echo "❌ Failed to download backup from Telegram." >&2
+    exit 1
+  fi
+  if [ -z "${DOWNLOADED}" ] || [ ! -f "${DOWNLOADED}" ]; then
+    echo "❌ Downloaded file not found." >&2
+    exit 1
+  fi
+  echo "✅ Downloaded: $(basename "${DOWNLOADED}")"
+
+  # Hand off to the normal restore flow by setting the positional args and
+  # letting the existing logic below run against the downloaded file.
+  set -- "${DOWNLOADED}" "${TARGET_DB}"
+fi
+
 BACKUP_FILE="$1"
 TARGET_DB="$2"
 
