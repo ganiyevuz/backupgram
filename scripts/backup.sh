@@ -250,6 +250,17 @@ send_to_telegram() {
       if [ -z "${file_id}" ]; then
         file_id=$(echo "${response}" | grep -o '"file_id":"[^"]*"' | head -1 | cut -d'"' -f4)
       fi
+      # Embed the restore id in the message caption so it can be retrieved later
+      # with `restore --from-telegram`. Non-fatal: the backup is already sent.
+      local message_id
+      message_id=$(echo "${response}" | grep -o '"message_id":[0-9]*' | head -1 | cut -d':' -f2)
+      if [ -n "${message_id}" ]; then
+        curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/editMessageCaption" \
+          -F "chat_id=${chat_id}" \
+          -F "message_id=${message_id}" \
+          -F "caption=${caption}"$'\n'"🔖 Restore ID: ${message_id}" \
+          > /dev/null 2>&1 || echo "⚠️ Could not embed restore id for chat ${chat_id}." >&2
+      fi
     else
       local error_desc
       error_desc=$(echo "${response}" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
