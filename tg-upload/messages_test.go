@@ -65,3 +65,34 @@ func TestRestoreIDLine(t *testing.T) {
 		t.Errorf("restoreIDLine(4521) = %q", got)
 	}
 }
+
+// The Telegram-supplied filename is untrusted; documentFromMessages must strip
+// directory components so it can never escape the download directory.
+func TestDocumentFromMessagesSanitizesFilename(t *testing.T) {
+	mk := func(fname string) tg.MessagesMessagesClass {
+		doc := &tg.Document{ID: 1}
+		doc.Attributes = []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: fname}}
+		return &tg.MessagesMessages{Messages: []tg.MessageClass{
+			&tg.Message{ID: 5, Media: &tg.MessageMediaDocument{Document: doc}},
+		}}
+	}
+	tests := []struct {
+		in, want string
+	}{
+		{"../../etc/passwd", "passwd"},
+		{"/etc/shadow", "shadow"},
+		{"mydb.sql.gz", "mydb.sql.gz"},
+		{"..", "restore-5"},      // base is "..", falls back
+		{"/", "restore-5"},       // base is "/", falls back
+		{"a/b/c.tar.gz", "c.tar.gz"},
+	}
+	for _, tt := range tests {
+		_, name, err := documentFromMessages(mk(tt.in), 5)
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", tt.in, err)
+		}
+		if name != tt.want {
+			t.Errorf("filename %q -> %q, want %q", tt.in, name, tt.want)
+		}
+	}
+}

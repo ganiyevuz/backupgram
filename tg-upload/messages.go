@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/gotd/td/tg"
 )
@@ -64,12 +65,20 @@ func documentFromMessages(msgs tg.MessagesMessagesClass, id int) (*tg.Document, 
 		if !ok {
 			return nil, "", fmt.Errorf("message %d document is unavailable", id)
 		}
-		name := fmt.Sprintf("restore-%d", id)
+		fallback := fmt.Sprintf("restore-%d", id)
+		name := fallback
 		for _, attr := range doc.Attributes {
 			if fn, ok := attr.(*tg.DocumentAttributeFilename); ok && fn.FileName != "" {
 				name = fn.FileName
 				break
 			}
+		}
+		// The filename is supplied by the Telegram server (untrusted). Strip any
+		// directory components so it can never escape the caller's output dir
+		// (path traversal via "../" or an absolute path).
+		name = filepath.Base(name)
+		if name == "." || name == ".." || name == "/" {
+			name = fallback
 		}
 		return doc, name, nil
 	}
