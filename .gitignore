@@ -14,3 +14,8 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# Local secrets / environment (never commit real credentials)
+.env
+.env.*
+!.env.example

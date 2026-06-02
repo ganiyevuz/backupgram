@@ -11,3 +11,6 @@ LICENSE
 docker/
 docker-bake.hcl
 generate-docker-bake.sh
+examples/
+.env
+.env.*

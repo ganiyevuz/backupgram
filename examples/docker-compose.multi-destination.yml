@@ -1,7 +1,9 @@
 # ─────────────────────────────────────────────────────────────
-# Minimal — one database, daily backup, Telegram delivery (≤ 50 MB)
-# The smallest working setup. See examples/README.md to pick another.
-# Provide TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID via a .env file (see .env.example).
+# Multi-destination — deliver each backup to several Telegram chats
+# TELEGRAM_CHAT_ID accepts a comma-separated list; the backup is uploaded
+# once and fanned out to every chat (file_id reuse ≤ 50 MB, a single MTProto
+# upload reused for larger files). TELEGRAM_THREAD_ID is honoured only when a
+# single chat is configured.  ·  See examples/README.md and docs/CONFIGURATION.md
 # ─────────────────────────────────────────────────────────────
 services:
   postgres:
@@ -30,8 +32,16 @@ services:
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       SCHEDULE: "@daily"
+
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
-      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
+      # Fan out to an ops channel + a personal chat (the bot must be a member of each).
+      TELEGRAM_CHAT_ID: "-1001234567890,123456789"
+      # MTProto creds so large backups also fan out (uploaded once, sent to all).
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+      TELEGRAM_UPLOAD_METHOD: "smart"      # smart | botapi | mtproto
+
+      PROJECT_NAME: "Production Database"
     volumes:
       - backups:/backups
     restart: unless-stopped

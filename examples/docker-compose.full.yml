@@ -1,4 +1,8 @@
-# Full setup — all features enabled
+# ─────────────────────────────────────────────────────────────
+# Full — every feature, heavily commented as a reference
+# Copy what you need; most settings have sensible defaults and can be omitted.
+# For files > 50 MB see the large-files-* examples. See examples/README.md.
+# ─────────────────────────────────────────────────────────────
 services:
   postgres:
     image: postgres:17
@@ -8,56 +12,60 @@ services:
       POSTGRES_PASSWORD: mypassword
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
 
   backup:
     image: ganiyevuz/postgres-backup-telegram:17
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
-      # Database connection
+      # ── Database connection ──
       POSTGRES_HOST: postgres
-      POSTGRES_DB: "mydb,analytics"    # comma-separated for multiple databases
+      POSTGRES_DB: "mydb,analytics"        # comma-separated for multiple databases
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       POSTGRES_PORT: 5432
       POSTGRES_CONNECT_TIMEOUT: 30
 
-      # Backup schedule and options
-      SCHEDULE: "0 2 * * *"            # 2 AM daily
-      BACKUP_ON_START: "TRUE"          # backup immediately on container start
-      BACKUP_DIR: /backups
-      BACKUP_SUFFIX: ".sql.gz"
-      POSTGRES_EXTRA_OPTS: "-Z6"       # compression level 6
+      # ── Schedule & dump options ──
+      SCHEDULE: "0 2 * * *"                # cron: 2 AM daily (or @daily, @weekly, …)
+      BACKUP_ON_START: "TRUE"              # also back up immediately on container start
+      POSTGRES_EXTRA_OPTS: "-Z6"           # pg_dump flags (here: gzip level 6)
       POSTGRES_EXCLUDE_TABLES: "django_session,celery_tasksetmeta"
 
-      # Retention policy
+      # ── Retention (per rotation slot) ──
       BACKUP_KEEP_DAYS: 7
       BACKUP_KEEP_WEEKS: 4
       BACKUP_KEEP_MONTHS: 6
-      BACKUP_KEEP_MINS: 1440
+      BACKUP_KEEP_MINS: 1440               # how long to keep files in last/
 
-      # Encryption (optional)
-      BACKUP_ENCRYPTION_KEY: "${BACKUP_ENCRYPTION_KEY}"
+      # ── Encryption (optional) ──
+      BACKUP_ENCRYPTION_KEY: "${BACKUP_ENCRYPTION_KEY}"   # GPG AES-256; empty = disabled
 
-      # Disk space safety
-      BACKUP_MIN_DISK_SPACE: 500       # MB
+      # ── Disk-space safety ──
+      BACKUP_MIN_DISK_SPACE: 500           # MB free required before a backup runs
 
-      # Telegram notifications
+      # ── Telegram delivery ──
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
-      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
-      TELEGRAM_THREAD_ID: ""           # for supergroup topics
-      TELEGRAM_NOTIFY_ON: "all"        # all | failure | success | none
+      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"   # comma-separated to fan out to several chats
+      TELEGRAM_THREAD_ID: ""               # supergroup topic id (single-chat only)
+      TELEGRAM_NOTIFY_ON: "all"            # all | failure | success | none
+      TELEGRAM_UPLOAD_METHOD: "smart"      # smart | botapi | mtproto (see large-files examples)
+      PROJECT_NAME: "My Project"           # label shown in captions/alerts
 
-      # Project identification
-      PROJECT_NAME: "My Project"
-
-      # Webhooks (optional)
+      # ── Webhooks (optional) ──
       WEBHOOK_URL: ""
       WEBHOOK_PRE_BACKUP_URL: ""
       WEBHOOK_POST_BACKUP_URL: ""
       WEBHOOK_ERROR_URL: ""
 
-      # Health check
+      # ── Healthcheck ──
       HEALTHCHECK_PORT: 8080
     volumes:
       - backups:/backups

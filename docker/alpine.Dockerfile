@@ -1,4 +1,16 @@
 ARG BASETAG=alpine
+
+# --- Build the MTProto large-file uploader (static, native cross-compile) ---
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS tgbuilder
+WORKDIR /src
+COPY tg-upload/go.mod tg-upload/go.sum ./
+RUN go mod download
+COPY tg-upload/ ./
+ARG TARGETOS TARGETARCH TARGETVARIANT
+RUN GOARM="$(echo "${TARGETVARIANT}" | sed 's/^v//')" \
+    GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w" -o /out/tg-upload .
+
 FROM postgres:$BASETAG
 
 ARG GOCRONVER=v0.0.11
@@ -40,10 +52,15 @@ ENV POSTGRES_DB="" \
     WEBHOOK_EXTRA_ARGS="" \
     TELEGRAM_BOT_TOKEN_FILE="" \
     TELEGRAM_CHAT_ID_FILE="" \
+    TELEGRAM_API_ID="" \
+    TELEGRAM_API_HASH="" \
+    TELEGRAM_API_ID_FILE="" \
+    TELEGRAM_API_HASH_FILE="" \
     TELEGRAM_BOT_TOKEN="" \
     TELEGRAM_CHAT_ID="" \
     TELEGRAM_THREAD_ID="" \
     TELEGRAM_API_URL="https://api.telegram.org" \
+    TELEGRAM_UPLOAD_METHOD="smart" \
     PROJECT_NAME="" \
     BACKUP_ENCRYPTION_KEY="" \
     BACKUP_MIN_DISK_SPACE=100 \
@@ -51,6 +68,9 @@ ENV POSTGRES_DB="" \
     POSTGRES_EXCLUDE_TABLES="" \
     POSTGRES_CONNECT_TIMEOUT=30 \
     BACKUP_MAX_AGE_HOURS=48
+
+# Vendored MTProto uploader for files >50MB (built in the tgbuilder stage)
+COPY --from=tgbuilder /out/tg-upload /usr/local/bin/tg-upload
 
 # Copy scripts and hooks
 COPY hooks/ /hooks/

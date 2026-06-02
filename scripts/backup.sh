@@ -58,8 +58,9 @@ TELEGRAM_NOTIFY_ON="${TELEGRAM_NOTIFY_ON:-all}"
 # Initialize directories
 mkdir -p "${BACKUP_DIR}/last/" "${BACKUP_DIR}/daily/" "${BACKUP_DIR}/weekly/" "${BACKUP_DIR}/monthly/"
 
-# Telegram file size limit (50MB in bytes)
+# Telegram file size limit (50MB in bytes) and the bot MTProto ceiling (2GB)
 TELEGRAM_MAX_SIZE=52428800
+TELEGRAM_MTPROTO_MAX_SIZE=2147483648
 
 # Get human-readable size of a file or directory
 get_size() {
@@ -141,6 +142,23 @@ verify_backup() {
   return 0
 }
 
+# Send the prepared upload file to Telegram via the MTProto binary (tg-upload).
+# Args: <upload_file> <caption> <original_file>. Delivery failure is non-fatal;
+# cleans up a directory tar archive afterward.
+mtproto_send() {
+  local upload_file="$1" cap="$2" orig="$3"
+  local tg_args=(--file "${upload_file}" --chat "${TELEGRAM_CHAT_ID}" --caption "${cap}")
+  if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+    tg_args+=(--thread "${TELEGRAM_THREAD_ID}")
+  fi
+  if tg-upload "${tg_args[@]}"; then
+    echo "✅ Backup sent to Telegram (MTProto)."
+  else
+    echo "⚠️ MTProto upload failed. Backup is still saved locally." >&2
+  fi
+  if [ -d "${orig}" ]; then rm -f "${upload_file}"; fi
+}
+
 # Send a file to Telegram with size validation
 send_to_telegram() {
   local file="$1"
@@ -154,44 +172,104 @@ send_to_telegram() {
     tar -czf "${send_file}" -C "$(dirname "${file}")" "$(basename "${file}")"
   fi
 
-  # Check file size - only enforce limit for official API
+  # Check file size
   local file_size
   file_size=$(get_size_bytes "${send_file}")
 
-  # Warn if using official API with large files
-  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
-    echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit." >&2
-    echo "💡 Hint: Set TELEGRAM_API_URL to your self-hosted Bot API server to send large files." >&2
-    if [ -d "${file}" ]; then rm -f "${send_file}"; fi
-    return 1
-  fi
-
-  # Build caption with optional project name
+  # Build caption with optional project name (used by both the curl and MTProto paths)
   local caption="📂 PostgreSQL Backup"
   if [ -n "${PROJECT_NAME}" ]; then
     caption="${caption} [${PROJECT_NAME}]"
   fi
   caption="${caption}: ${db} ($(date +'%Y-%m-%d %H:%M:%S')) [$(get_size "${send_file}")]"
 
-  # Build curl args with optional thread support
-  local curl_args=()
-  curl_args+=(-F "chat_id=${TELEGRAM_CHAT_ID}")
-  curl_args+=(-F "document=@${send_file}")
-  curl_args+=(-F "caption=${caption}")
-  if [ -n "${TELEGRAM_THREAD_ID}" ]; then
-    curl_args+=(-F "message_thread_id=${TELEGRAM_THREAD_ID}")
+  local method="${TELEGRAM_UPLOAD_METHOD:-smart}"
+
+  # mtproto mode: deliver every file via the MTProto binary, regardless of size.
+  if [ "${method}" = "mtproto" ]; then
+    if [ "${file_size}" -gt "${TELEGRAM_MTPROTO_MAX_SIZE}" ]; then
+      echo "⚠️ Backup $(get_size "${send_file}") exceeds the 2GB MTProto limit. Kept locally." >&2
+      if [ -d "${file}" ]; then rm -f "${send_file}"; fi
+      return 1
+    fi
+    echo "⬆️ Uploading via MTProto (TELEGRAM_UPLOAD_METHOD=mtproto)..."
+    mtproto_send "${send_file}" "${caption}" "${file}"
+    return 0
   fi
 
-  local response
-  response=$(curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
-    "${curl_args[@]}")
+  # Official Bot API caps uploads at 50MB. In smart mode an oversize file may be
+  # routed to MTProto; in botapi mode it never is.
+  if [ "${TELEGRAM_API_URL}" = "https://api.telegram.org" ] && [ "${file_size}" -gt "${TELEGRAM_MAX_SIZE}" ]; then
+    if [ "${method}" = "smart" ] \
+       && [ "${file_size}" -le "${TELEGRAM_MTPROTO_MAX_SIZE}" ] \
+       && [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ] \
+       && command -v tg-upload >/dev/null 2>&1; then
+      echo "⬆️ Backup exceeds 50MB — uploading via MTProto (up to 2GB)..."
+      mtproto_send "${send_file}" "${caption}" "${file}"
+      return 0
+    fi
+    echo "⚠️ Backup $(get_size "${send_file}") exceeds Telegram 50MB limit." >&2
+    if [ "${method}" = "smart" ]; then
+      echo "💡 Hint: set TELEGRAM_API_ID + TELEGRAM_API_HASH to send via MTProto (up to 2GB), or set TELEGRAM_API_URL to a self-hosted Bot API server." >&2
+    fi
+    if [ -d "${file}" ]; then rm -f "${send_file}"; fi
+    return 1
+  fi
 
-  if echo "${response}" | grep -q '"ok":true'; then
-    echo "✅ Backup sent to Telegram."
-  else
-    local error_desc
-    error_desc=$(echo "${response}" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
-    echo "⚠️ Failed to send backup to Telegram: ${error_desc:-unknown error}. Backup is still saved locally." >&2
+  # Fan out to every configured chat. Upload to the first chat, then reuse the
+  # returned file_id for the rest (no re-upload). Falls back to re-uploading if
+  # the first send fails to yield a file_id.
+  local chat_ids
+  read -ra chat_ids <<< "${TELEGRAM_CHAT_IDS:-${TELEGRAM_CHAT_ID}}"
+  local single_chat="false"
+  if [ "${#chat_ids[@]}" -le 1 ]; then single_chat="true"; fi
+
+  local file_id=""
+  local sent=0
+  local chat_id
+  for chat_id in "${chat_ids[@]}"; do
+    local curl_args=()
+    curl_args+=(-F "chat_id=${chat_id}")
+    if [ -n "${file_id}" ]; then
+      curl_args+=(-F "document=${file_id}")
+    else
+      curl_args+=(-F "document=@${send_file}")
+    fi
+    curl_args+=(-F "caption=${caption}")
+    if [ "${single_chat}" = "true" ] && [ -n "${TELEGRAM_THREAD_ID}" ]; then
+      curl_args+=(-F "message_thread_id=${TELEGRAM_THREAD_ID}")
+    fi
+
+    local response
+    response=$(curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+      "${curl_args[@]}")
+
+    if echo "${response}" | grep -q '"ok":true'; then
+      sent=$((sent + 1))
+      echo "✅ Backup sent to Telegram chat ${chat_id}."
+      if [ -z "${file_id}" ]; then
+        file_id=$(echo "${response}" | grep -o '"file_id":"[^"]*"' | head -1 | cut -d'"' -f4)
+      fi
+      # Embed the restore id in the message caption so it can be retrieved later
+      # with `restore --from-telegram`. Non-fatal: the backup is already sent.
+      local message_id
+      message_id=$(echo "${response}" | grep -o '"message_id":[0-9]*' | head -1 | cut -d':' -f2)
+      if [ -n "${message_id}" ]; then
+        curl -s -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/editMessageCaption" \
+          -F "chat_id=${chat_id}" \
+          -F "message_id=${message_id}" \
+          -F "caption=${caption}"$'\n'"🔖 Restore ID: ${message_id}" \
+          > /dev/null 2>&1 || echo "⚠️ Could not embed restore id for chat ${chat_id}." >&2
+      fi
+    else
+      local error_desc
+      error_desc=$(echo "${response}" | grep -o '"description":"[^"]*"' | cut -d'"' -f4)
+      echo "⚠️ Failed to send backup to Telegram chat ${chat_id}: ${error_desc:-unknown error}." >&2
+    fi
+  done
+
+  if [ "${sent}" -eq 0 ]; then
+    echo "⚠️ Backup not delivered to any chat. It is still saved locally." >&2
   fi
 
   # Clean up temporary tar archive
@@ -203,17 +281,25 @@ send_to_telegram() {
 # Send a text message to Telegram
 send_telegram_message() {
   local message="$1"
-  if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+  if [ -z "${TELEGRAM_BOT_TOKEN}" ] || [ -z "${TELEGRAM_CHAT_ID}" ]; then
+    return 0
+  fi
+  local chat_ids
+  read -ra chat_ids <<< "${TELEGRAM_CHAT_IDS:-${TELEGRAM_CHAT_ID}}"
+  local single_chat="false"
+  if [ "${#chat_ids[@]}" -le 1 ]; then single_chat="true"; fi
+  local chat_id
+  for chat_id in "${chat_ids[@]}"; do
     local curl_args=()
-    curl_args+=(-d "chat_id=${TELEGRAM_CHAT_ID}")
+    curl_args+=(-d "chat_id=${chat_id}")
     curl_args+=(-d "text=${message}")
     curl_args+=(-d "parse_mode=Markdown")
-    if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+    if [ "${single_chat}" = "true" ] && [ -n "${TELEGRAM_THREAD_ID}" ]; then
       curl_args+=(-d "message_thread_id=${TELEGRAM_THREAD_ID}")
     fi
     curl -s --fail -X POST "${TELEGRAM_API_URL}/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
       "${curl_args[@]}" > /dev/null 2>&1 || true
-  fi
+  done
 }
 
 # Track backup results

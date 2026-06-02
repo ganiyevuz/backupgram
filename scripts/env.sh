@@ -69,6 +69,49 @@ if [ -n "${TELEGRAM_CHAT_ID_FILE}" ] && [ -r "${TELEGRAM_CHAT_ID_FILE}" ]; then
   # shellcheck disable=SC2155
   export TELEGRAM_CHAT_ID="$(cat "${TELEGRAM_CHAT_ID_FILE}")"
 fi
+# MTProto large-file upload credentials (optional, from https://my.telegram.org/apps)
+if [ -n "${TELEGRAM_API_ID_FILE}" ] && [ -r "${TELEGRAM_API_ID_FILE}" ]; then
+  # shellcheck disable=SC2155
+  export TELEGRAM_API_ID="$(cat "${TELEGRAM_API_ID_FILE}")"
+fi
+if [ -n "${TELEGRAM_API_HASH_FILE}" ] && [ -r "${TELEGRAM_API_HASH_FILE}" ]; then
+  # shellcheck disable=SC2155
+  export TELEGRAM_API_HASH="$(cat "${TELEGRAM_API_HASH_FILE}")"
+fi
+
+if [ -n "${TELEGRAM_API_ID}" ] && [ -n "${TELEGRAM_API_HASH}" ]; then
+  echo "✅ Large-file upload enabled (MTProto, up to 2GB)."
+fi
+
+# Upload method selector: smart (auto by size) | botapi (Bot API only) | mtproto (binary only).
+TELEGRAM_UPLOAD_METHOD="$(echo "${TELEGRAM_UPLOAD_METHOD:-smart}" | tr '[:upper:]' '[:lower:]')"
+case "${TELEGRAM_UPLOAD_METHOD}" in
+  smart | botapi) ;;
+  mtproto)
+    if [ -z "${TELEGRAM_API_ID}" ] || [ -z "${TELEGRAM_API_HASH}" ]; then
+      echo "❌ TELEGRAM_UPLOAD_METHOD=mtproto requires TELEGRAM_API_ID and TELEGRAM_API_HASH." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "❌ TELEGRAM_UPLOAD_METHOD must be one of: smart, botapi, mtproto (got '${TELEGRAM_UPLOAD_METHOD}')." >&2
+    exit 1
+    ;;
+esac
+export TELEGRAM_UPLOAD_METHOD
+
+# Split comma-separated chat ids into a space-separated list for fan-out delivery.
+TELEGRAM_CHAT_IDS="${TELEGRAM_CHAT_ID//,/ }"
+
+# A forum-topic id is valid only within one supergroup, so warn that it is
+# ignored when delivering to multiple chats.
+if [ -n "${TELEGRAM_THREAD_ID}" ]; then
+  read -ra _chat_id_arr <<< "${TELEGRAM_CHAT_IDS}"
+  if [ "${#_chat_id_arr[@]}" -gt 1 ]; then
+    echo "⚠️ Multiple chat ids set — TELEGRAM_THREAD_ID will be ignored (topic ids are per-supergroup)." >&2
+  fi
+  unset _chat_id_arr
+fi
 
 # Set Telegram API URL (default to official, allow custom self-hosted Bot API)
 export TELEGRAM_API_URL="${TELEGRAM_API_URL:-https://api.telegram.org}"

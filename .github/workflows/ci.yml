@@ -13,9 +13,35 @@ on:
       - '**.md'
       - '.github/**'
 
+# Cancel superseded PR runs (avoids piling up redundant multi-arch builds);
+# never cancel an in-progress publish on main.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: jobs only read the repo; publishing uses a Docker Hub PAT.
+permissions:
+  contents: read
+
 jobs:
+  test-go:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: tg-upload/go.sum
+      - name: Vet and test the MTProto uploader
+        working-directory: tg-upload
+        run: |
+          go vet ./...
+          go test ./...
+
   test-script:
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -59,6 +85,8 @@ jobs:
       TELEGRAM_BOT_TOKEN_FILE: ""
       TELEGRAM_CHAT_ID_FILE: ""
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_THREAD_ID: ""
       TELEGRAM_NOTIFY_ON: "all"
@@ -119,6 +147,13 @@ jobs:
           GPG_COUNT=$(find "$BACKUP_DIR/last" -name "*.gpg" | wc -l)
           test "$GPG_COUNT" -gt 0 || (echo "No encrypted backup found" && exit 1)
 
+      - name: Test MTProto large-file upload (gated on secrets)
+        if: ${{ env.TELEGRAM_API_ID != '' }}
+        run: |
+          go build -C tg-upload -o /usr/local/bin/tg-upload .
+          head -c 60000000 /dev/urandom > /tmp/big.bin
+          tg-upload --file /tmp/big.bin --chat "$TELEGRAM_CHAT_ID" --caption "CI MTProto test"
+
       - name: Test list command
         run: |
           bash scripts/list.sh
@@ -149,9 +184,28 @@ jobs:
 
   test-docker:
     if: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
-    needs: [ test-script ]
+    needs: [ test-script, test-go ]
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # One job per image target (version × base), built in parallel. Each job gets
+    # a fresh runner with full disk, so the multi-arch build no longer exhausts a
+    # single runner; a failure is isolated to its target.
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - debian-latest
+          - debian-17
+          - debian-16
+          - debian-15
+          - alpine-latest
+          - alpine-17
+          - alpine-16
+          - alpine-15
     steps:
+      - name: Increase available disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
@@ -160,14 +214,29 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Test docker images build
-        run: docker buildx bake --pull
+      - name: Build ${{ matrix.target }}
+        run: docker buildx bake --pull ${{ matrix.target }}
 
   publish:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs: [ test-script ]
+    needs: [ test-script, test-go ]
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     environment: docker.io
+    # Build + push one target per job, in parallel. Each target has its own tags,
+    # so per-target jobs push independent multi-arch manifests (no merge step).
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - debian-latest
+          - debian-17
+          - debian-16
+          - debian-15
+          - alpine-latest
+          - alpine-17
+          - alpine-16
+          - alpine-15
     steps:
       - name: Increase available disk space
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
@@ -181,23 +250,16 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Configure build revision
-        id: vars
-        run: echo "BUILD_REVISION=${GITHUB_SHA:0:7}" >> $GITHUB_ENV
+        run: echo "BUILD_REVISION=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
 
-      - name: Build images
+      - name: Build and push ${{ matrix.target }}
         env:
           REGISTRY_PREFIX: ${{ secrets.DOCKERHUB_USERNAME }}/
           BUILD_REVISION: ${{ env.BUILD_REVISION }}
-        run: docker buildx bake --pull
-
-      - name: Push images
-        env:
-          REGISTRY_PREFIX: ${{ secrets.DOCKERHUB_USERNAME }}/
-          BUILD_REVISION: ${{ env.BUILD_REVISION }}
-        run: docker buildx bake --push
+        run: docker buildx bake --pull --push ${{ matrix.target }}

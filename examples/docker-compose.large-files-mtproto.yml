@@ -1,7 +1,8 @@
 # ─────────────────────────────────────────────────────────────
-# Minimal — one database, daily backup, Telegram delivery (≤ 50 MB)
-# The smallest working setup. See examples/README.md to pick another.
-# Provide TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID via a .env file (see .env.example).
+# Large files via MTProto — backups up to 2 GB, NO extra service (recommended)
+# The image's built-in tg-upload binary uploads over MTProto when a backup
+# exceeds the Bot API's 50 MB cap. Just add api_id/api_hash; no sidecar.
+# Credentials: https://my.telegram.org/apps  ·  Details: docs/LARGE_FILES.md
 # ─────────────────────────────────────────────────────────────
 services:
   postgres:
@@ -30,8 +31,14 @@ services:
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       SCHEDULE: "@daily"
+
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
       TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
+      # MTProto large-file upload — files up to 2 GB, no sidecar needed.
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+
+      PROJECT_NAME: "Production Database"
     volumes:
       - backups:/backups
     restart: unless-stopped

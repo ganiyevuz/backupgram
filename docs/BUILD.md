@@ -13,7 +13,7 @@ Dockerfiles are located in the [`docker/`](../docker/) directory (`alpine.Docker
 docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 docker buildx rm multibuilder 2>/dev/null || true
 docker buildx create --name multibuilder \
-  --platform linux/amd64,linux/arm64,linux/arm/v7,linux/s390x,linux/ppc64le \
+  --platform linux/amd64,linux/arm64 \
   --driver docker-container --use
 docker buildx inspect --bootstrap
 ```

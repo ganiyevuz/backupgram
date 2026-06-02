@@ -1,0 +1,33 @@
+# postgres-backup-telegram
+
+> A pure-Bash Docker image that runs automated PostgreSQL backups on a cron
+> schedule, with rotating retention, Telegram delivery (Bot API + MTProto),
+> optional GPG encryption, webhooks, multi-chat fan-out, and built-in restore
+> tooling. Published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine]`.
+
+## Core Files
+- [scripts/init.sh]: ENTRYPOINT — validates config, then execs go-cron with SCHEDULE
+- [scripts/env.sh]: dual-purpose config — sourced for validation/var resolution, executed standalone at startup
+- [scripts/backup.sh]: the backup cycle — dump, verify, encrypt, rotate, send to Telegram, prune
+- [scripts/restore.sh]: restore tooling — interactive, by file, cross-database, or --from-telegram
+- [tg-upload/]: Go binary (gotd/td) for MTProto upload/download of files up to 2 GB
+- [hooks/]: run-parts hooks (pre-backup | post-backup | error); 00-webhook implements WEBHOOK_* vars
+- [docker/debian.Dockerfile, docker/alpine.Dockerfile]: image definitions; kept in lockstep (identical ENV + symlinks)
+- [generate-docker-bake.sh]: source of truth for docker-bake.hcl (generated — do not hand-edit)
+- [.github/workflows/ci.yml]: runs scripts against a live postgres:16, then builds/publishes images
+
+## Documentation
+- [README.md]: quick start, environment variables, CLI commands, how backups work, hooks
+- [CHANGELOG.md]: notable changes (Keep a Changelog format)
+- [docs/BUILD.md]: multi-arch build with QEMU + buildx
+- [docs/LARGE_FILES.md]: MTProto large-file (>50 MB, up to 2 GB) upload route
+- [CLAUDE.md]: runtime architecture, build system, testing, and conventions for contributors
+
+## Key Concepts
+- Rotation model: each run writes to last/, then hard-links into daily/weekly/monthly/ (same inode, no extra disk); requires a POSIX filesystem with hardlink+symlink support
+- Format branches: gzip SQL (.sql.gz, default), directory (-Fd), cluster (pg_dumpall), each optionally GPG-wrapped (.gpg) — kept in sync across backup.sh and restore.sh
+- Telegram transport: TELEGRAM_UPLOAD_METHOD = smart | botapi | mtproto; 50 MB Bot API limit enforced only against the official api.telegram.org
+- Multi-chat fan-out: comma-separated TELEGRAM_CHAT_ID; uploaded once, file_id reused per chat
+- Restore by message id: backups embed a 🔖 Restore ID in their caption; restore --from-telegram fetches and restores it
+- Secrets precedence: *_FILE (Docker secrets) takes precedence over the plain env var
+- Scheduling/health: go-cron (prodrigestivill/go-cron) owns SCHEDULE and serves the healthcheck on HEALTHCHECK_PORT
