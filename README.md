@@ -13,7 +13,7 @@ Supports multiple databases, cluster-wide dumps (`pg_dumpall`), table exclusion,
 
 ## Quick Start
 
-Create a `docker-compose.yml` (see [`examples/`](examples/) — [which one do I pick?](examples/README.md)):
+Create a `docker-compose.yml` (or copy a ready-made one — see [Examples](#examples) below):
 
 ```yaml
 services:
@@ -51,9 +51,36 @@ docker compose up -d
 ```
 
 New to the project? Follow the **[Getting Started guide](docs/GETTING_STARTED.md)**
-for a zero-to-restorable-backup walkthrough. For a full-featured example with
-encryption, webhooks, and retention tuning, see
-[`examples/docker-compose.full.yml`](examples/docker-compose.full.yml).
+for a zero-to-restorable-backup walkthrough.
+
+---
+
+## Examples
+
+Ready-to-run Compose files live in [`examples/`](examples/). Pick the one closest
+to your need, copy it to `docker-compose.yml`, copy
+[`.env.example`](examples/.env.example) to `.env` and fill in your values, then
+`docker compose up -d`.
+
+| Example | Use it when | Max file size | Extra service |
+|---|---|---|---|
+| [`minimal`](examples/docker-compose.minimal.yml) | Quickest start — one DB, daily, Telegram | 50 MB | none |
+| [`full`](examples/docker-compose.full.yml) | Reference — every option, commented | 50 MB | none |
+| [`large-files-mtproto`](examples/docker-compose.large-files-mtproto.yml) | Backups > 50 MB, simplest (**recommended**) | 2 GB | none |
+| [`large-files-server`](examples/docker-compose.large-files-server.yml) | Backups > 50 MB, prefer a Bot API server | 2 GB | `telegram-bot-api` sidecar |
+| [`multi-destination`](examples/docker-compose.multi-destination.yml) | Deliver each backup to several chats | 2 GB | none |
+
+```sh
+cp examples/docker-compose.minimal.yml docker-compose.yml
+cp examples/.env.example .env        # then edit .env with real values
+docker compose up -d
+```
+
+- **Large files (> 50 MB):** the official Bot API caps uploads at 50 MB; the two
+  `large-files-*` examples lift that to 2 GB (mtproto = built-in, no container;
+  server = self-hosted Bot API daemon). See [docs/LARGE_FILES.md](docs/LARGE_FILES.md).
+- **Multiple chats:** set `TELEGRAM_CHAT_ID` to a comma-separated list — the backup
+  is uploaded once and fanned out to every chat.
 
 ---
 
