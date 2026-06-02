@@ -24,7 +24,7 @@ See [`examples/docker-compose.large-files-mtproto.yml`](../examples/docker-compo
 
 Run the official `telegram-bot-api` daemon as a sidecar and point `TELEGRAM_API_URL` at it. The existing `curl` path then handles files up to 2 GB unchanged. This is heavier (an extra service + volume) but keeps everything on the Bot API.
 
-See [`examples/docker-compose.large-files.yml`](../examples/docker-compose.large-files.yml).
+See [`examples/docker-compose.large-files-server.yml`](../examples/docker-compose.large-files-server.yml).
 
 ## Forcing a transport with `TELEGRAM_UPLOAD_METHOD`
 

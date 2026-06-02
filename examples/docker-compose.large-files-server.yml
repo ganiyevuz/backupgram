@@ -1,10 +1,24 @@
 # ─────────────────────────────────────────────────────────────
-# Large files via MTProto — backups up to 2 GB, NO extra service (recommended)
-# The image's built-in tg-upload binary uploads over MTProto when a backup
-# exceeds the Bot API's 50 MB cap. Just add api_id/api_hash; no sidecar.
-# Credentials: https://my.telegram.org/apps  ·  Details: docs/LARGE_FILES.md
+# Large files via self-hosted Bot API server — backups up to 2 GB
+# Alternative to the MTProto example: runs the official telegram-bot-api
+# daemon as a sidecar and points TELEGRAM_API_URL at it. Heavier (an extra
+# service + volume) but keeps delivery entirely on the Bot API.
+# Prefer docker-compose.large-files-mtproto.yml unless you specifically want
+# a Bot API server.  ·  Details: docs/LARGE_FILES.md
 # ─────────────────────────────────────────────────────────────
 services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    environment:
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"     # https://my.telegram.org/apps
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+      TELEGRAM_LOCAL: "true"
+    ports:
+      - "8081:8081"
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+    restart: unless-stopped
+
   postgres:
     image: postgres:17
     environment:
@@ -19,6 +33,7 @@ services:
     image: ganiyevuz/postgres-backup-telegram:17
     depends_on:
       - postgres
+      - telegram-bot-api
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_DB: mydb
@@ -28,9 +43,8 @@ services:
 
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
       TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
-      # MTProto large-file upload — files up to 2 GB, no sidecar needed.
-      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
-      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+      # Point at the sidecar's local Bot API server (raises the 50 MB cap to 2 GB).
+      TELEGRAM_API_URL: "http://telegram-bot-api:8081"
 
       PROJECT_NAME: "Production Database"
     volumes:
@@ -40,3 +54,4 @@ services:
 volumes:
   pgdata:
   backups:
+  telegram-bot-api-data:

@@ -1,4 +1,8 @@
-# Minimal setup — backs up one database daily, sends to Telegram
+# ─────────────────────────────────────────────────────────────
+# Minimal — one database, daily backup, Telegram delivery (≤ 50 MB)
+# The smallest working setup. See examples/README.md to pick another.
+# Provide TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID via a .env file (see .env.example).
+# ─────────────────────────────────────────────────────────────
 services:
   postgres:
     image: postgres:17
@@ -8,6 +12,7 @@ services:
       POSTGRES_PASSWORD: mypassword
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
 
   backup:
     image: ganiyevuz/postgres-backup-telegram:17
@@ -23,6 +28,7 @@ services:
       TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
     volumes:
       - backups:/backups
+    restart: unless-stopped
 
 volumes:
   pgdata:

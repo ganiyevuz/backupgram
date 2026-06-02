@@ -13,7 +13,7 @@ Supports multiple databases, cluster-wide dumps (`pg_dumpall`), table exclusion,
 
 ## Quick Start
 
-Create a `docker-compose.yml` (see also [`examples/`](examples/)):
+Create a `docker-compose.yml` (see [`examples/`](examples/) — [which one do I pick?](examples/README.md)):
 
 ```yaml
 services:

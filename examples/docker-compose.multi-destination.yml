@@ -1,8 +1,9 @@
 # ─────────────────────────────────────────────────────────────
-# Large files via MTProto — backups up to 2 GB, NO extra service (recommended)
-# The image's built-in tg-upload binary uploads over MTProto when a backup
-# exceeds the Bot API's 50 MB cap. Just add api_id/api_hash; no sidecar.
-# Credentials: https://my.telegram.org/apps  ·  Details: docs/LARGE_FILES.md
+# Multi-destination — deliver each backup to several Telegram chats
+# TELEGRAM_CHAT_ID accepts a comma-separated list; the backup is uploaded
+# once and fanned out to every chat (file_id reuse ≤ 50 MB, a single MTProto
+# upload reused for larger files). TELEGRAM_THREAD_ID is honoured only when a
+# single chat is configured.  ·  See examples/README.md and docs/CONFIGURATION.md
 # ─────────────────────────────────────────────────────────────
 services:
   postgres:
@@ -27,10 +28,12 @@ services:
       SCHEDULE: "@daily"
 
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
-      TELEGRAM_CHAT_ID: "${TELEGRAM_CHAT_ID}"
-      # MTProto large-file upload — files up to 2 GB, no sidecar needed.
+      # Fan out to an ops channel + a personal chat (the bot must be a member of each).
+      TELEGRAM_CHAT_ID: "-1001234567890,123456789"
+      # MTProto creds so large backups also fan out (uploaded once, sent to all).
       TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
       TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+      TELEGRAM_UPLOAD_METHOD: "smart"      # smart | botapi | mtproto
 
       PROJECT_NAME: "Production Database"
     volumes:
