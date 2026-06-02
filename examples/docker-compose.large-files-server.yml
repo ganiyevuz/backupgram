@@ -8,6 +8,7 @@
 # ─────────────────────────────────────────────────────────────
 services:
   telegram-bot-api:
+    # Pin to a released tag in production instead of :latest.
     image: aiogram/telegram-bot-api:latest
     environment:
       TELEGRAM_API_ID: "${TELEGRAM_API_ID}"     # https://my.telegram.org/apps
@@ -27,13 +28,20 @@ services:
       POSTGRES_PASSWORD: mypassword
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
   backup:
     image: ganiyevuz/postgres-backup-telegram:17
     depends_on:
-      - postgres
-      - telegram-bot-api
+      postgres:
+        condition: service_healthy
+      telegram-bot-api:
+        condition: service_started
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_DB: mydb
