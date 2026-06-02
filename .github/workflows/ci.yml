@@ -175,6 +175,9 @@ jobs:
     needs: [ test-script, test-go ]
     runs-on: ubuntu-latest
     steps:
+      - name: Increase available disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+
       - uses: actions/checkout@v4
 
       - name: Set up QEMU
