@@ -21,4 +21,3 @@ func run(ctx context.Context, args []string) error {
 	}
 	return runUpload(ctx, args)
 }
-

@@ -82,8 +82,8 @@ func TestDocumentFromMessagesSanitizesFilename(t *testing.T) {
 		{"../../etc/passwd", "passwd"},
 		{"/etc/shadow", "shadow"},
 		{"mydb.sql.gz", "mydb.sql.gz"},
-		{"..", "restore-5"},      // base is "..", falls back
-		{"/", "restore-5"},       // base is "/", falls back
+		{"..", "restore-5"}, // base is "..", falls back
+		{"/", "restore-5"},  // base is "/", falls back
 		{"a/b/c.tar.gz", "c.tar.gz"},
 	}
 	for _, tt := range tests {
