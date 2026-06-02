@@ -3,11 +3,11 @@
 ![Docker Pulls](https://img.shields.io/docker/pulls/ganiyevuz/postgres-backup-telegram)
 [![CI](https://github.com/ganiyevuz/docker-postgres-backup-telegram/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ganiyevuz/docker-postgres-backup-telegram/actions)
 ![License](https://img.shields.io/github/license/ganiyevuz/docker-postgres-backup-telegram)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-13%20%7C%2014%20%7C%2015%20%7C%2016%20%7C%2017-336791?logo=postgresql&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%20%7C%2016%20%7C%2017%20%7C%2018-336791?logo=postgresql&logoColor=white)
 
 Automated PostgreSQL backups in Docker with rotating retention, Telegram notifications, optional GPG encryption, and built-in restore tooling.
 
-Supports multiple databases, cluster-wide dumps (`pg_dumpall`), table exclusion, disk space checks, backup verification, webhook integrations, and Docker secrets. Available for **linux/amd64**, **linux/arm64**, **linux/arm/v7**, **linux/s390x**, and **linux/ppc64le** in both Debian and Alpine variants.
+Supports multiple databases, cluster-wide dumps (`pg_dumpall`), table exclusion, disk space checks, backup verification, webhook integrations, and Docker secrets. Available for **linux/amd64** and **linux/arm64** in both Debian and Alpine variants.
 
 ---
 
@@ -190,8 +190,8 @@ Images are published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine
 
 | Tag | Base | PostgreSQL |
 |---|---|---|
-| `17`, `16`, `15`, `14`, `13` | Debian | Matching version |
-| `17-alpine`, `16-alpine`, ... | Alpine | Matching version |
+| `latest`, `18`, `17`, `16`, `15` | Debian | Matching version (`latest` = 18) |
+| `alpine`, `18-alpine`, `17-alpine`, ... | Alpine | Matching version (`alpine` = 18) |
 
 ---
 

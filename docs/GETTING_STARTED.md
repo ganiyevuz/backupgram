@@ -34,9 +34,12 @@ tag accordingly:
 
 | Your PostgreSQL | Debian tag | Alpine tag |
 |---|---|---|
-| 17 | `ganiyevuz/postgres-backup-telegram:17` | `…:17-alpine` |
+| 18 (newest) | `ganiyevuz/postgres-backup-telegram:18` (or `:latest`) | `…:18-alpine` (or `:alpine`) |
+| 17 | `…:17` | `…:17-alpine` |
 | 16 | `…:16` | `…:16-alpine` |
-| 15 / 14 / 13 | `…:15` / `…:14` / `…:13` | `…-alpine` |
+| 15 | `…:15` | `…:15-alpine` |
+
+> The bundled `pg_dump` must be the same major version as your server **or newer**, so pick the tag matching your PostgreSQL version (a newer tag also works for an older server).
 
 ---
 
