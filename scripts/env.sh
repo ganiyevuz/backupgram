@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Pre-validate the environment
-if [ -z "${POSTGRES_DB}" ] && [ -z "${POSTGRES_DB_FILE}" ]; then
-  echo "❌ You need to set the POSTGRES_DB or POSTGRES_DB_FILE environment variable."
+if [ "${POSTGRES_DB_AUTODISCOVER}" != "TRUE" ] && [ -z "${POSTGRES_DB}" ] && [ -z "${POSTGRES_DB_FILE}" ]; then
+  echo "❌ You need to set POSTGRES_DB or POSTGRES_DB_FILE (or enable POSTGRES_DB_AUTODISCOVER)."
   exit 1
 fi
 
@@ -27,7 +27,16 @@ if [ -z "${POSTGRES_PASSWORD}" ] && [ -z "${POSTGRES_PASSWORD_FILE}" ] && [ -z "
 fi
 
 # Process vars
-if [ -z "${POSTGRES_DB_FILE}" ]; then
+if [ "${POSTGRES_DB_AUTODISCOVER}" = "TRUE" ]; then
+  # Auto-discover mode: the DB list is resolved at backup time, after
+  # connectivity is confirmed (see backup.sh). env.sh stays connection-free so
+  # standalone VALIDATE_ON_START works even when the server is unreachable.
+  if [ -n "${POSTGRES_DB}" ] || [ -n "${POSTGRES_DB_FILE}" ]; then
+    echo "ℹ️ POSTGRES_DB / POSTGRES_DB_FILE ignored: auto-discover is on (databases are discovered at backup time)."
+  fi
+  # shellcheck disable=SC2034
+  POSTGRES_DBS=""
+elif [ -z "${POSTGRES_DB_FILE}" ]; then
   POSTGRES_DBS="${POSTGRES_DB//,/ }"
 elif [ -r "${POSTGRES_DB_FILE}" ]; then
   # shellcheck disable=SC2034
@@ -35,6 +44,11 @@ elif [ -r "${POSTGRES_DB_FILE}" ]; then
 else
   echo "❌ Missing POSTGRES_DB_FILE file."
   exit 1
+fi
+
+# POSTGRES_DB_EXCLUDE has no effect unless auto-discover is on; warn rather than fail.
+if [ -n "${POSTGRES_DB_EXCLUDE}" ] && [ "${POSTGRES_DB_AUTODISCOVER}" != "TRUE" ]; then
+  echo "ℹ️ POSTGRES_DB_EXCLUDE ignored (auto-discover is off)."
 fi
 
 if [ -z "${POSTGRES_USER_FILE}" ]; then
