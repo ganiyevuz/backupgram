@@ -1,10 +1,12 @@
-package main
+package config
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"pgbackupapi/httpx"
 )
 
 func withBackupDir(t *testing.T) string {
@@ -30,33 +32,33 @@ func TestShellSingleQuote(t *testing.T) {
 
 func TestValidatePatchRejectsUnknownKey(t *testing.T) {
 	withBackupDir(t)
-	err := validatePatch(map[string]string{"POSTGRES_PASSWORD": "x"})
-	ae, ok := err.(*apiError)
+	err := ValidatePatch(map[string]string{"POSTGRES_PASSWORD": "x"})
+	ae, ok := err.(*httpx.Error)
 	if !ok || ae.Status != 403 {
-		t.Fatalf("want 403 apiError, got %v", err)
+		t.Fatalf("want 403 httpx.Error, got %v", err)
 	}
 }
 
 func TestValidatePatchRejectsBadValue(t *testing.T) {
 	withBackupDir(t)
-	err := validatePatch(map[string]string{"BACKUP_KEEP_DAYS": "notanint"})
-	ae, ok := err.(*apiError)
+	err := ValidatePatch(map[string]string{"BACKUP_KEEP_DAYS": "notanint"})
+	ae, ok := err.(*httpx.Error)
 	if !ok || ae.Status != 400 {
-		t.Fatalf("want 400 apiError, got %v", err)
+		t.Fatalf("want 400 httpx.Error, got %v", err)
 	}
 }
 
 func TestValidatePatchRejectsNewline(t *testing.T) {
 	withBackupDir(t)
-	err := validatePatch(map[string]string{"POSTGRES_DB": "a\nb"})
-	if ae, ok := err.(*apiError); !ok || ae.Status != 400 {
-		t.Fatalf("want 400 apiError, got %v", err)
+	err := ValidatePatch(map[string]string{"POSTGRES_DB": "a\nb"})
+	if ae, ok := err.(*httpx.Error); !ok || ae.Status != 400 {
+		t.Fatalf("want 400 httpx.Error, got %v", err)
 	}
 }
 
 func TestApplyPatchWritesBothFilesAndSchedFlag(t *testing.T) {
 	dir := withBackupDir(t)
-	changed, err := applyPatch(map[string]string{"SCHEDULE": "@hourly", "BACKUP_KEEP_DAYS": "14"})
+	changed, err := ApplyPatch(map[string]string{"SCHEDULE": "@hourly", "BACKUP_KEEP_DAYS": "14"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,10 +81,10 @@ func TestApplyPatchWritesBothFilesAndSchedFlag(t *testing.T) {
 
 func TestEffectiveConfigMasksSecrets(t *testing.T) {
 	withBackupDir(t)
-	if _, err := applyPatch(map[string]string{"TELEGRAM_BOT_TOKEN": "supersecret"}); err != nil {
+	if _, err := ApplyPatch(map[string]string{"TELEGRAM_BOT_TOKEN": "supersecret"}); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := effectiveConfig()
+	cfg, err := Effective()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +93,7 @@ func TestEffectiveConfigMasksSecrets(t *testing.T) {
 		t.Errorf("secret should report set=true, got %v", entry)
 	}
 	if _, leaked := entry["value"]; leaked {
-		t.Error("secret value must never appear in effectiveConfig")
+		t.Error("secret value must never appear in Effective")
 	}
 	if entry["source"] != "override" {
 		t.Errorf("source=%v want override", entry["source"])
@@ -100,8 +102,8 @@ func TestEffectiveConfigMasksSecrets(t *testing.T) {
 
 func TestClearOverrideReverts(t *testing.T) {
 	withBackupDir(t)
-	applyPatch(map[string]string{"BACKUP_KEEP_DAYS": "14"})
-	existed, err := clearOverride("BACKUP_KEEP_DAYS")
+	ApplyPatch(map[string]string{"BACKUP_KEEP_DAYS": "14"})
+	existed, err := ClearOverride("BACKUP_KEEP_DAYS")
 	if err != nil || !existed {
 		t.Fatalf("clear failed: existed=%v err=%v", existed, err)
 	}

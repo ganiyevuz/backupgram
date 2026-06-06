@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -9,15 +9,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"pgbackupapi/httpx"
 )
-
-// apiError carries an HTTP status so handlers can map failures consistently.
-type apiError struct {
-	Status int
-	Msg    string
-}
-
-func (e *apiError) Error() string { return e.Msg }
 
 type keySpec struct {
 	secret   bool
@@ -126,24 +120,24 @@ func saveOverrides(m map[string]string) error {
 	return writeFileAtomic(overrideEnvPath(), []byte(b.String()))
 }
 
-func validatePatch(patch map[string]string) error {
+func ValidatePatch(patch map[string]string) error {
 	for k, v := range patch {
 		spec, ok := mutableKeys[k]
 		if !ok {
-			return &apiError{Status: 403, Msg: "config key not allowed: " + k}
+			return &httpx.Error{Status: 403, Msg: "config key not allowed: " + k}
 		}
 		if strings.ContainsAny(v, "\n\r\x00") {
-			return &apiError{Status: 400, Msg: "value contains control characters: " + k}
+			return &httpx.Error{Status: 400, Msg: "value contains control characters: " + k}
 		}
 		if err := spec.validate(v); err != nil {
-			return &apiError{Status: 400, Msg: fmt.Sprintf("invalid value for %s: %v", k, err)}
+			return &httpx.Error{Status: 400, Msg: fmt.Sprintf("invalid value for %s: %v", k, err)}
 		}
 	}
 	return nil
 }
 
-func applyPatch(patch map[string]string) (scheduleChanged bool, err error) {
-	if err = validatePatch(patch); err != nil {
+func ApplyPatch(patch map[string]string) (scheduleChanged bool, err error) {
+	if err = ValidatePatch(patch); err != nil {
 		return false, err
 	}
 	cur, err := loadOverrides()
@@ -162,9 +156,9 @@ func applyPatch(patch map[string]string) (scheduleChanged bool, err error) {
 	return scheduleChanged, nil
 }
 
-func clearOverride(key string) (existed bool, err error) {
+func ClearOverride(key string) (existed bool, err error) {
 	if _, ok := mutableKeys[key]; !ok {
-		return false, &apiError{Status: 403, Msg: "config key not allowed: " + key}
+		return false, &httpx.Error{Status: 403, Msg: "config key not allowed: " + key}
 	}
 	cur, err := loadOverrides()
 	if err != nil {
@@ -180,7 +174,7 @@ func clearOverride(key string) (existed bool, err error) {
 	return true, nil
 }
 
-func effectiveConfig() (map[string]any, error) {
+func Effective() (map[string]any, error) {
 	ov, err := loadOverrides()
 	if err != nil {
 		return nil, err
