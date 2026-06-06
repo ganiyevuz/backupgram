@@ -34,6 +34,42 @@ if ! pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -t "${POSTGRES_CONN
 fi
 echo "✅ Database is reachable."
 
+# Auto-discover databases (opt-in). Runs only after connectivity is confirmed.
+if [ "${POSTGRES_DB_AUTODISCOVER}" = "TRUE" ]; then
+  if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
+    echo "ℹ️ Auto-discover ignored: cluster mode dumps the whole cluster via pg_dumpall."
+  else
+    echo "🔍 Auto-discovering databases..."
+    # Constant SQL: skip templates, non-connectable DBs, and the built-in
+    # 'postgres' maintenance DB. User excludes are applied in Bash below, so
+    # POSTGRES_DB_EXCLUDE is never interpolated into SQL (no injection surface).
+    if ! DISCOVERED=$(psql -d postgres -tAc \
+      "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate AND datname <> 'postgres' ORDER BY datname"); then
+      echo "❌ Error: database auto-discovery query failed. Aborting." >&2
+      exit 1
+    fi
+
+    POSTGRES_DBS=""
+    # shellcheck disable=SC2086
+    for _ad_db in ${DISCOVERED}; do
+      _ad_skip="false"
+      # Exclude list is comma-delimited; database names containing spaces are not supported (matches POSTGRES_EXCLUDE_TABLES).
+      # shellcheck disable=SC2086
+      for _ad_ex in ${POSTGRES_DB_EXCLUDE//,/ }; do
+        if [ "${_ad_db}" = "${_ad_ex}" ]; then _ad_skip="true"; break; fi
+      done
+      [ "${_ad_skip}" = "false" ] && POSTGRES_DBS="${POSTGRES_DBS} ${_ad_db}"
+    done
+    POSTGRES_DBS=$(echo "${POSTGRES_DBS}" | xargs)  # trim surrounding whitespace
+
+    if [ -z "${POSTGRES_DBS}" ]; then
+      echo "❌ Auto-discover found no databases to back up (after exclusions). Aborting." >&2
+      exit 1
+    fi
+    echo "✅ Auto-discovered $(echo "${POSTGRES_DBS}" | wc -w | tr -d ' ') database(s): ${POSTGRES_DBS}"
+  fi
+fi
+
 # Check available disk space (default minimum: 100MB)
 BACKUP_MIN_DISK_SPACE="${BACKUP_MIN_DISK_SPACE:-100}"
 AVAILABLE_MB=$(df -m "${BACKUP_DIR}" 2>/dev/null | awk 'NR==2 {print $4}')
