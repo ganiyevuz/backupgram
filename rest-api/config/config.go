@@ -9,9 +9,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"pgbackupapi/httpx"
 )
+
+var overrideMu sync.Mutex
 
 type keySpec struct {
 	secret   bool
@@ -140,6 +143,8 @@ func ApplyPatch(patch map[string]string) (scheduleChanged bool, err error) {
 	if err = ValidatePatch(patch); err != nil {
 		return false, err
 	}
+	overrideMu.Lock()
+	defer overrideMu.Unlock()
 	cur, err := loadOverrides()
 	if err != nil {
 		return false, err
@@ -160,6 +165,8 @@ func ClearOverride(key string) (existed bool, err error) {
 	if _, ok := mutableKeys[key]; !ok {
 		return false, &httpx.Error{Status: 403, Msg: "config key not allowed: " + key}
 	}
+	overrideMu.Lock()
+	defer overrideMu.Unlock()
 	cur, err := loadOverrides()
 	if err != nil {
 		return false, err

@@ -134,6 +134,23 @@ func TestDeleteRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestConfigRouteAuth(t *testing.T) {
+	t.Setenv("BACKUP_DIR", t.TempDir())
+	h := newTestHandlers(t)
+
+	// with valid token -> 200
+	rec := do(t, h, "GET", "/config", "secret", "")
+	if rec.Code != 200 {
+		t.Fatalf("GET /config with token: code=%d want 200 body=%s", rec.Code, rec.Body)
+	}
+
+	// without token -> 401
+	rec = do(t, h, "GET", "/config", "", "")
+	if rec.Code != 401 {
+		t.Fatalf("GET /config without token: code=%d want 401", rec.Code)
+	}
+}
+
 func TestBackupRouteAndJobQuery(t *testing.T) {
 	h := newTestHandlers(t)
 
