@@ -28,6 +28,10 @@ services:
       # ── Database connection ──
       POSTGRES_HOST: postgres
       POSTGRES_DB: "mydb,analytics"        # comma-separated for multiple databases
+      # Auto-discover every database on the server instead of listing them.
+      # When TRUE, POSTGRES_DB above is ignored (templates + the 'postgres' DB are always skipped).
+      # POSTGRES_DB_AUTODISCOVER: "TRUE"
+      # POSTGRES_DB_EXCLUDE: "analytics,scratch"   # names to skip from auto-discovery
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
       POSTGRES_PORT: 5432

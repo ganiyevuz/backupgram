@@ -10,6 +10,11 @@ release scheme is adopted.
 ## [Unreleased]
 
 ### Added
+- **Auto-discover databases** — set `POSTGRES_DB_AUTODISCOVER=TRUE` to back up
+  every non-template database on the server. The built-in `postgres` maintenance
+  database and anything in `POSTGRES_DB_EXCLUDE` are skipped, `POSTGRES_DB`
+  becomes optional, and the list is refreshed each run. Ignored when
+  `POSTGRES_CLUSTER=TRUE`; an empty discovered set aborts the run.
 - **Restore from Telegram** — `restore --from-telegram <message-id>` downloads a
   backup straight from the configured chat and restores it. Each backup message
   now carries a `🔖 Restore ID` in its caption (embedded after both Bot API and

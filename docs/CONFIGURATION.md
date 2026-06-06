@@ -24,10 +24,19 @@ precedence over the plain variable.
 | `POSTGRES_USER` | **required** | PostgreSQL user |
 | `POSTGRES_PASSWORD` | **required** | PostgreSQL password |
 | `POSTGRES_DB` | **required** | Database name(s), comma-separated for multiple |
+| `POSTGRES_DB_AUTODISCOVER` | `FALSE` | When `TRUE`, back up every non-template database the server reports (minus `postgres` and `POSTGRES_DB_EXCLUDE`); `POSTGRES_DB` becomes optional. Ignored in cluster mode. |
+| `POSTGRES_DB_EXCLUDE` | `""` | Comma-separated database names to skip when auto-discover is on. |
 | `POSTGRES_EXTRA_OPTS` | `-Z1` | Extra flags passed to `pg_dump` / `pg_dumpall` (word-split, so `-Z0 -Fd` works) |
 | `POSTGRES_CLUSTER` | `FALSE` | Set `TRUE` to use `pg_dumpall` for a full cluster dump |
 | `POSTGRES_EXCLUDE_TABLES` | `""` | Comma-separated tables to exclude from the dump |
 | `POSTGRES_CONNECT_TIMEOUT` | `30` | Seconds to wait for the `pg_isready` connectivity check |
+
+> **Auto-discover rule:** all non-template databases that allow connections,
+> minus the built-in `postgres` maintenance database, minus anything listed in
+> `POSTGRES_DB_EXCLUDE`. `template0`/`template1` are always excluded. The list is
+> resolved fresh on every run, so databases created later are picked up
+> automatically. If `POSTGRES_CLUSTER=TRUE`, cluster mode wins and auto-discover
+> is ignored (with a log note). An empty discovered set aborts the run.
 
 > The local `pg_dump` client major version must match the server. Pick the image
 > tag accordingly (e.g. `:16` against a PostgreSQL 16 server).
