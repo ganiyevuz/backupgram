@@ -17,6 +17,9 @@ Thumbs.db
 
 docs/superpowers/
 
+# Local-only dev compose (not part of the repo)
+docker-compose.local.yml
+
 # Local secrets / environment (never commit real credentials)
 .env
 .env.*
