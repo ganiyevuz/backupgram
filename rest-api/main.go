@@ -36,9 +36,9 @@ func getenvOr(k, def string) string {
 
 func gocronBin() string { return getenvOr("GOCRON_BIN", "/usr/local/bin/go-cron") }
 
-func gocronArgs(schedule string) []string {
+func gocronArgs(schedule string, initialRun bool) []string {
 	args := []string{"-s", schedule, "-p", getenvOr("HEALTHCHECK_PORT", "8080")}
-	if os.Getenv("BACKUP_ON_START") == "TRUE" {
+	if initialRun && os.Getenv("BACKUP_ON_START") == "TRUE" {
 		args = append(args, "-i")
 	}
 	return append(args, "--", "/backup.sh")
@@ -61,7 +61,7 @@ func main() {
 		schedule = "@daily"
 	}
 
-	sup := supervisor.NewSupervisor(gocronBin(), gocronArgs(schedule))
+	sup := supervisor.NewSupervisor(gocronBin(), gocronArgs(schedule, true))
 	if err := sup.Start(); err != nil {
 		log.Fatalf("failed to start scheduler: %v", err)
 	}
@@ -69,7 +69,7 @@ func main() {
 	h := &handlers.Handlers{
 		BackupDir:       getenvOr("BACKUP_DIR", "/backups"),
 		Jobs:            jobs.NewJobManager(jobs.DefaultRunner),
-		RestartSchedule: func(newSchedule string) error { return sup.Restart(gocronArgs(newSchedule)) },
+		RestartSchedule: func(newSchedule string) error { return sup.Restart(gocronArgs(newSchedule, false)) },
 	}
 
 	srv := &http.Server{Addr: ":" + getenvOr("REST_API_PORT", "8081"), Handler: server.Router(token, h)}

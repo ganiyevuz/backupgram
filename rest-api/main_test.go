@@ -8,8 +8,7 @@ import (
 
 func TestGocronArgs(t *testing.T) {
 	t.Setenv("HEALTHCHECK_PORT", "8080")
-	t.Setenv("BACKUP_ON_START", "")
-	got := gocronArgs("@daily")
+	got := gocronArgs("@daily", false)
 	want := []string{"-s", "@daily", "-p", "8080", "--", "/backup.sh"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -24,7 +23,7 @@ func TestGocronArgs(t *testing.T) {
 func TestGocronArgsBackupOnStart(t *testing.T) {
 	t.Setenv("HEALTHCHECK_PORT", "9000")
 	t.Setenv("BACKUP_ON_START", "TRUE")
-	got := gocronArgs("@hourly")
+	got := gocronArgs("@hourly", true)
 	// must contain -i, and end with -- /backup.sh
 	joined := ""
 	for _, a := range got {
@@ -32,6 +31,18 @@ func TestGocronArgsBackupOnStart(t *testing.T) {
 	}
 	if want := "-s @hourly -p 9000 -i -- /backup.sh "; joined != want {
 		t.Fatalf("got %q want %q", joined, want)
+	}
+}
+
+func TestGocronArgsNoInitNoIFlag(t *testing.T) {
+	t.Setenv("HEALTHCHECK_PORT", "8080")
+	t.Setenv("BACKUP_ON_START", "TRUE")
+	got := gocronArgs("@hourly", false)
+	// restart must never inject -i, even when BACKUP_ON_START=TRUE
+	for _, a := range got {
+		if a == "-i" {
+			t.Fatalf("restart call must not contain -i flag; got %v", got)
+		}
 	}
 }
 

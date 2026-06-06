@@ -138,16 +138,19 @@ id. Poll `GET /jobs/{id}` until the state is terminal:
 | `queued` | Accepted, not yet started |
 | `running` | In progress |
 | `succeeded` | Completed without error |
-| `failed` | Completed with an error (check `message`) |
+| `failed` | Completed with an error (check `state`, `error`, and `log_tail`) |
 
 ```json
 {
-  "id": "b3f1a2c4",
+  "id": "a1b2c3d4e5f6a7b8",
   "type": "backup",
   "state": "succeeded",
-  "started_at": "2026-04-16T14:30:00Z",
-  "finished_at": "2026-04-16T14:30:12Z",
-  "message": ""
+  "queued_at": 1780735738,
+  "started_at": 1780735738,
+  "finished_at": 1780735739,
+  "exit_code": 0,
+  "log_tail": ["...up to last 50 lines of combined output..."],
+  "error": ""
 }
 ```
 
@@ -158,8 +161,11 @@ in-memory and cleared on container restart.
 
 ## Runtime config
 
-`GET /config` returns the effective value of every mutable key. Secrets are
-masked — they show `{"value":null,"set":true}` if configured, `{"value":null,"set":false}` if not.
+`GET /config` returns the effective value of every mutable key. Non-secret
+keys appear as `{"value":"...","source":"base|override"}`. Secret (write-only)
+keys are masked — the `value` field is omitted entirely and only `set` and
+`source` are returned: `{"set":true,"source":"base"}` if configured,
+`{"set":false,"source":"base"}` if not set.
 
 `PATCH /config` accepts a JSON object of `{KEY: value}` pairs. The update is
 atomic (all-or-nothing): if any key is blocked the entire request is rejected
