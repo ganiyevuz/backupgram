@@ -133,3 +133,28 @@ func TestDeleteRequiresAuth(t *testing.T) {
 		t.Fatalf("no-auth code=%d want 401", rec.Code)
 	}
 }
+
+func TestBackupRouteAndJobQuery(t *testing.T) {
+	h := newTestHandlers(t)
+
+	// POST /backup -> 202 + job_id
+	rec := do(t, h, "POST", "/backup", "secret", "")
+	if rec.Code != 202 {
+		t.Fatalf("POST /backup code=%d want 202 body=%s", rec.Code, rec.Body)
+	}
+	var backupResp struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &backupResp); err != nil {
+		t.Fatal(err)
+	}
+	if backupResp.JobID == "" {
+		t.Fatal("POST /backup: missing job_id in response")
+	}
+
+	// GET /jobs/{id} -> 200 (proves {id} path param plumbing)
+	rec = do(t, h, "GET", "/jobs/"+backupResp.JobID, "secret", "")
+	if rec.Code != 200 {
+		t.Fatalf("GET /jobs/%s code=%d want 200 body=%s", backupResp.JobID, rec.Code, rec.Body)
+	}
+}
