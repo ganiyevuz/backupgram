@@ -39,6 +39,12 @@ jobs:
           go vet ./...
           go test ./...
 
+      - name: Vet and test the REST API server
+        working-directory: rest-api
+        run: |
+          go vet ./...
+          go test ./... -race
+
   test-script:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
@@ -152,6 +158,49 @@ jobs:
           test -z "$(find "$BACKUP_DIR/last" -name 'app2-*' -print -quit)"      || (echo "FAIL: app2 should be excluded" && exit 1)
           test -z "$(find "$BACKUP_DIR/last" -name 'postgres-*' -print -quit)"  || (echo "FAIL: postgres should be excluded" && exit 1)
           echo "✅ auto-discover: app1 present, app2 + postgres excluded"
+
+      - name: Test REST API (build, run, exercise end-to-end)
+        env:
+          REST_API_ENABLE: "TRUE"
+          REST_API_TOKEN: "ci-secret"
+          REST_API_PORT: "8099"
+        run: |
+          go build -C rest-api -o /usr/local/bin/pgbackup-api .
+          # The API submits jobs that exec the in-image absolute paths; link the repo scripts there.
+          sudo ln -sf "$PWD/scripts/env.sh" /env.sh
+          sudo ln -sf "$PWD/scripts/backup.sh" /backup.sh
+          sudo ln -sf "$PWD/scripts/restore.sh" /restore.sh
+          # Stub scheduler so the supervisor has a child without needing real go-cron.
+          printf '#!/usr/bin/env bash\nexec sleep 86400\n' > /usr/local/bin/go-cron-stub
+          chmod +x /usr/local/bin/go-cron-stub
+          rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
+          GOCRON_BIN=/usr/local/bin/go-cron-stub /usr/local/bin/pgbackup-api &
+          APIPID=$!
+          trap 'kill $APIPID 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do curl -sf localhost:8099/healthz && break; sleep 0.5; done
+          echo
+          AUTH=(-H "Authorization: Bearer ci-secret")
+          # auth required on a protected route
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8099/status)" = "401"
+          # trigger a backup, poll the job to a terminal state
+          JOB=$(curl -s "${AUTH[@]}" -X POST localhost:8099/backup | sed -E 's/.*"job_id":"([^"]+)".*/\1/')
+          test -n "$JOB" || { echo "no job_id"; exit 1; }
+          STATE=""
+          for i in $(seq 1 30); do
+            STATE=$(curl -s "${AUTH[@]}" "localhost:8099/jobs/$JOB" | sed -E 's/.*"state":"([^"]+)".*/\1/')
+            [ "$STATE" = "succeeded" ] && break
+            [ "$STATE" = "failed" ] && { echo "backup job failed:"; curl -s "${AUTH[@]}" "localhost:8099/jobs/$JOB"; exit 1; }
+            sleep 1
+          done
+          test "$STATE" = "succeeded" || { echo "job did not finish: $STATE"; exit 1; }
+          # the backup appears in the inventory
+          curl -s "${AUTH[@]}" localhost:8099/backups | grep -q '"name"'
+          # config PATCH writes the override file
+          curl -s "${AUTH[@]}" -X PATCH localhost:8099/config -d '{"BACKUP_KEEP_DAYS":"14"}' | grep -q '"BACKUP_KEEP_DAYS"'
+          grep -q "export BACKUP_KEEP_DAYS='14'" "$BACKUP_DIR/.api-overrides.env"
+          # blocked key rejected
+          test "$(curl -s -o /dev/null -w '%{http_code}' "${AUTH[@]}" -X PATCH localhost:8099/config -d '{"POSTGRES_PASSWORD":"x"}')" = "403"
+          echo "✅ REST API integration passed"
 
       - name: Test backup with GPG encryption
         env:
