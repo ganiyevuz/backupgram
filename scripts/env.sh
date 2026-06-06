@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 
+# Apply runtime config overrides written by the REST API (if present). These are
+# 'export KEY=...' lines, so sourcing makes them visible to backup.sh, restore.sh,
+# and the run-parts hooks. Values are single-quote-escaped by the API.
+_API_OVERRIDES="${BACKUP_DIR:-/backups}/.api-overrides.env"
+if [ -f "${_API_OVERRIDES}" ]; then
+  # shellcheck disable=SC1090
+  . "${_API_OVERRIDES}"
+fi
+
 # Pre-validate the environment
 if [ "${POSTGRES_DB_AUTODISCOVER}" != "TRUE" ] && [ -z "${POSTGRES_DB}" ] && [ -z "${POSTGRES_DB_FILE}" ]; then
   echo "❌ You need to set POSTGRES_DB or POSTGRES_DB_FILE (or enable POSTGRES_DB_AUTODISCOVER)."
@@ -23,6 +32,12 @@ fi
 
 if [ -z "${POSTGRES_PASSWORD}" ] && [ -z "${POSTGRES_PASSWORD_FILE}" ] && [ -z "${POSTGRES_PASSFILE_STORE}" ]; then
   echo "❌ You need to set the POSTGRES_PASSWORD, POSTGRES_PASSWORD_FILE, or POSTGRES_PASSFILE_STORE environment variable."
+  exit 1
+fi
+
+# REST API must never be exposed without a token.
+if [ "${REST_API_ENABLE}" = "TRUE" ] && [ -z "${REST_API_TOKEN}" ] && [ -z "${REST_API_TOKEN_FILE}" ]; then
+  echo "❌ REST_API_ENABLE=TRUE requires REST_API_TOKEN or REST_API_TOKEN_FILE." >&2
   exit 1
 fi
 

@@ -4,6 +4,10 @@
 
 STATUS_FILE="/tmp/backup_status"
 HEALTHCHECK_PORT="${HEALTHCHECK_PORT:-8080}"
+# Honor runtime overrides (e.g. BACKUP_MAX_AGE_HOURS) written by the REST API.
+_API_OVERRIDES="${BACKUP_DIR:-/backups}/.api-overrides.env"
+# shellcheck disable=SC1090
+[ -f "${_API_OVERRIDES}" ] && . "${_API_OVERRIDES}"
 BACKUP_MAX_AGE_HOURS="${BACKUP_MAX_AGE_HOURS:-48}"
 
 # Check 1: go-cron is alive
