@@ -136,6 +136,23 @@ jobs:
           bash -x scripts/backup.sh
           ls -laR "$BACKUP_DIR"
 
+      - name: Test auto-discover databases
+        env:
+          POSTGRES_DB_AUTODISCOVER: "TRUE"
+          POSTGRES_DB_EXCLUDE: "app2"
+        run: |
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE app1;" || true
+          psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE app2;" || true
+          rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
+          bash -x scripts/backup.sh
+          ls -laR "$BACKUP_DIR"
+          test -n "$(find "$BACKUP_DIR/last" -name 'app1-*.sql.gz' -print -quit)" || (echo "FAIL: app1 not backed up" && exit 1)
+          test -n "$(find "$BACKUP_DIR/last" -name 'database-*.sql.gz' -print -quit)" || (echo "FAIL: database (not excluded) not backed up" && exit 1)
+          test -z "$(find "$BACKUP_DIR/last" -name 'app2-*' -print -quit)"      || (echo "FAIL: app2 should be excluded" && exit 1)
+          test -z "$(find "$BACKUP_DIR/last" -name 'postgres-*' -print -quit)"  || (echo "FAIL: postgres should be excluded" && exit 1)
+          echo "✅ auto-discover: app1 present, app2 + postgres excluded"
+
       - name: Test backup with GPG encryption
         env:
           BACKUP_ENCRYPTION_KEY: "test-encryption-key"
