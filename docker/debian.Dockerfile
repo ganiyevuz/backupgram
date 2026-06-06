@@ -11,6 +11,15 @@ RUN GOARM="$(echo "${TARGETVARIANT}" | sed 's/^v//')" \
     GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
     go build -trimpath -ldflags="-s -w" -o /out/tg-upload .
 
+# --- Build the REST API control server (static, native cross-compile) ---
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS apibuilder
+WORKDIR /src
+COPY rest-api/ ./
+ARG TARGETOS TARGETARCH TARGETVARIANT
+RUN GOARM="$(echo "${TARGETVARIANT}" | sed 's/^v//')" \
+    GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w" -o /out/pgbackup-api .
+
 FROM postgres:$BASETAG
 
 ARG GOCRONVER=v0.0.11
@@ -50,6 +59,10 @@ ENV POSTGRES_DB="" \
     POSTGRES_CLUSTER="FALSE" \
     POSTGRES_DB_AUTODISCOVER="FALSE" \
     POSTGRES_DB_EXCLUDE="" \
+    REST_API_ENABLE="FALSE" \
+    REST_API_PORT=8081 \
+    REST_API_TOKEN="" \
+    REST_API_TOKEN_FILE="" \
     SCHEDULE="@daily" \
     VALIDATE_ON_START="TRUE" \
     BACKUP_ON_START="FALSE" \
@@ -87,6 +100,8 @@ ENV POSTGRES_DB="" \
 
 # Vendored MTProto uploader for files >50MB (built in the tgbuilder stage)
 COPY --from=tgbuilder /out/tg-upload /usr/local/bin/tg-upload
+# REST API control server (built in the apibuilder stage)
+COPY --from=apibuilder /out/pgbackup-api /usr/local/bin/pgbackup-api
 
 # Copy scripts and hooks
 COPY hooks/ /hooks/
@@ -109,6 +124,8 @@ VOLUME /backups
 
 # Set up entrypoint
 ENTRYPOINT ["/init.sh"]
+
+EXPOSE 8081
 
 # Healthcheck to monitor container
 HEALTHCHECK --interval=5m --timeout=3s \
