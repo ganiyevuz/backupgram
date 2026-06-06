@@ -147,15 +147,19 @@ echo "  Source: ${BACKUP_FILE}"
 echo "  Target: ${TARGET_DB}@${PGHOST}:${PGPORT}"
 echo "────────────────────────────────────────"
 
-# Ask for confirmation
-echo ""
-echo "⚠️  This will restore data into database '${TARGET_DB}'."
-echo "    Existing data may be overwritten."
-echo ""
-read -r -p "Continue? [y/N] " CONFIRM
-if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  echo "Restore cancelled."
-  exit 0
+# Ask for confirmation — interactive (TTY) only. Non-interactive callers (the
+# REST API, CI) have already confirmed and have no TTY to prompt on, so a blocking
+# read would abort the restore under `set -e`.
+if [ -t 0 ]; then
+  echo ""
+  echo "⚠️  This will restore data into database '${TARGET_DB}'."
+  echo "    Existing data may be overwritten."
+  echo ""
+  read -r -p "Continue? [y/N] " CONFIRM
+  if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
+    echo "Restore cancelled."
+    exit 0
+  fi
 fi
 
 RESTORE_FILE="${BACKUP_FILE}"
@@ -184,6 +188,19 @@ if [[ "${RESTORE_FILE}" == *.tar.gz ]] && [ -f "${RESTORE_FILE}" ]; then
   tar -xzf "${RESTORE_FILE}" -C "${EXTRACT_DIR}"
   RESTORE_FILE="${EXTRACT_DIR}/$(ls "${EXTRACT_DIR}" | head -1)"
   TEMP_FILES="${TEMP_FILES} ${EXTRACT_DIR}"
+fi
+
+# Ensure the target database exists for per-database restores — plain pg_dump
+# output contains no CREATE DATABASE. Cluster dumps (pg_dumpall) restore into
+# 'postgres' and create their own databases, so they are skipped here.
+if ! echo "${BACKUP_FILE}" | grep -q "cluster"; then
+  # Escape single quotes so the name is an inert SQL string literal (no injection),
+  # and pass it to createdb after `--` so a name starting with '-' can't be a flag.
+  TARGET_DB_SQL=${TARGET_DB//\'/\'\'}
+  if ! psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${TARGET_DB_SQL}'" | grep -q 1; then
+    echo "📦 Target database '${TARGET_DB}' does not exist — creating it..."
+    createdb -- "${TARGET_DB}"
+  fi
 fi
 
 # Step 3: Restore based on format
