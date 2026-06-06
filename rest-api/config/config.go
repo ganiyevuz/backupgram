@@ -181,6 +181,18 @@ func ClearOverride(key string) (existed bool, err error) {
 	return true, nil
 }
 
+// Get returns the effective raw value for a key: the persisted override if
+// present, otherwise the process environment. Intended for the composition root;
+// callers must not expose secret values returned by this.
+func Get(key string) string {
+	if ov, err := loadOverrides(); err == nil {
+		if v, ok := ov[key]; ok {
+			return v
+		}
+	}
+	return os.Getenv(key)
+}
+
 func Effective() (map[string]any, error) {
 	ov, err := loadOverrides()
 	if err != nil {
