@@ -103,3 +103,33 @@ func TestAuthEmptyTokenPanics(t *testing.T) {
 	}()
 	authMiddleware("", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 }
+
+func TestDownloadRoute(t *testing.T) {
+	h := newTestHandlers(t)
+	if err := os.WriteFile(filepath.Join(h.BackupDir, "last", "app1-1.sql.gz"), []byte("FILEDATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// with valid token -> 200, body matches file
+	rec := do(t, h, "GET", "/backups/last/app1-1.sql.gz", "secret", "")
+	if rec.Code != 200 {
+		t.Fatalf("download code=%d want 200 body=%s", rec.Code, rec.Body)
+	}
+	if rec.Body.String() != "FILEDATA" {
+		t.Fatalf("body=%q want %q", rec.Body.String(), "FILEDATA")
+	}
+
+	// without token -> 401
+	rec = do(t, h, "GET", "/backups/last/app1-1.sql.gz", "", "")
+	if rec.Code != 401 {
+		t.Fatalf("no-auth code=%d want 401", rec.Code)
+	}
+}
+
+func TestDeleteRequiresAuth(t *testing.T) {
+	h := newTestHandlers(t)
+	rec := do(t, h, "DELETE", "/backups/last/whatever.sql.gz", "", "")
+	if rec.Code != 401 {
+		t.Fatalf("no-auth code=%d want 401", rec.Code)
+	}
+}

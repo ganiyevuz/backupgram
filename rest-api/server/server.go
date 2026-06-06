@@ -30,6 +30,8 @@ func Router(token string, h *handlers.Handlers) http.Handler {
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /status", h.Status)
 	protected.HandleFunc("GET /backups", h.ListBackups)
+	protected.HandleFunc("GET /backups/{slot}/{name}", h.Download)
+	protected.HandleFunc("DELETE /backups/{slot}/{name}", h.Delete)
 
 	root := http.NewServeMux()
 	root.HandleFunc("GET /healthz", h.Healthz)
