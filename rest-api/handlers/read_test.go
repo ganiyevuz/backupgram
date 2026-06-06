@@ -59,3 +59,27 @@ func TestListBackups(t *testing.T) {
 		t.Errorf("unexpected backups: %v", resp.Backups)
 	}
 }
+
+func TestStatusReportsOverrideSchedule(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("BACKUP_DIR", dir)
+	if err := os.WriteFile(
+		filepath.Join(dir, ".api-overrides.json"),
+		[]byte(`{"SCHEDULE":"0 3 * * *"}`), 0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	h := newTestHandlers(t)
+	rec := httptest.NewRecorder()
+	h.Status(rec, httptest.NewRequest("GET", "/status", nil))
+	if rec.Code != 200 {
+		t.Fatalf("code=%d", rec.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["schedule"] != "0 3 * * *" {
+		t.Errorf("schedule=%v want override '0 3 * * *'", resp["schedule"])
+	}
+}

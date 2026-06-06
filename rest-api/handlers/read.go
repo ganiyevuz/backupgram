@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"pgbackupapi/backups"
+	"pgbackupapi/config"
 	"pgbackupapi/httpx"
 	"pgbackupapi/jobs"
 )
@@ -24,8 +25,14 @@ func (h *Handlers) Healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) Status(w http.ResponseWriter, r *http.Request) {
+	// Report the EFFECTIVE schedule (runtime override if set, else env) so the
+	// dashboard reflects a changed SCHEDULE, not the stale process env value.
+	schedule := config.Get("SCHEDULE")
+	if schedule == "" {
+		schedule = "@daily"
+	}
 	resp := map[string]any{
-		"schedule": getenvOr("SCHEDULE", "@daily"),
+		"schedule": schedule,
 		"cluster":  os.Getenv("POSTGRES_CLUSTER") == "TRUE",
 	}
 	if raw, err := os.ReadFile("/tmp/backup_status"); err == nil {
