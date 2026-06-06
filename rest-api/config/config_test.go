@@ -113,6 +113,16 @@ func TestClearOverrideReverts(t *testing.T) {
 	}
 }
 
+func TestValidatePatchUploadMethod(t *testing.T) {
+	withBackupDir(t)
+	if err := ValidatePatch(map[string]string{"TELEGRAM_UPLOAD_METHOD": "mtproto"}); err != nil {
+		t.Fatalf("mtproto should be valid: %v", err)
+	}
+	if err := ValidatePatch(map[string]string{"TELEGRAM_UPLOAD_METHOD": "carrier-pigeon"}); err == nil {
+		t.Fatal("invalid upload method must be rejected")
+	}
+}
+
 func TestValidateCronEveryRequiresDuration(t *testing.T) {
 	if validateCron("@every ") == nil {
 		t.Error("@every with no duration must be rejected")

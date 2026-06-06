@@ -36,6 +36,7 @@ var mutableKeys = map[string]keySpec{
 	"TELEGRAM_CHAT_ID":         {validate: validateAny},
 	"TELEGRAM_THREAD_ID":       {validate: validateAny},
 	"TELEGRAM_NOTIFY_ON":       {validate: validateNotifyOn},
+	"TELEGRAM_UPLOAD_METHOD":   {validate: validateUploadMethod},
 	"TELEGRAM_API_URL":         {validate: validateURL},
 	"BACKUP_MIN_DISK_SPACE":    {validate: validateUint},
 	"BACKUP_MAX_AGE_HOURS":     {validate: validateUint},
@@ -248,6 +249,13 @@ func validateURL(s string) error {
 		return fmt.Errorf("must be an http(s) URL")
 	}
 	return nil
+}
+func validateUploadMethod(s string) error {
+	switch s {
+	case "smart", "botapi", "mtproto":
+		return nil
+	}
+	return fmt.Errorf("must be smart, botapi, or mtproto")
 }
 func validateCron(s string) error {
 	if s == "" {
