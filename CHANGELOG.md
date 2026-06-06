@@ -10,6 +10,12 @@ release scheme is adopted.
 ## [Unreleased]
 
 ### Added
+- **REST API control surface** — opt-in (`REST_API_ENABLE=TRUE`) HTTP API behind a
+  single admin bearer token (`REST_API_TOKEN`/`_FILE`): trigger backups, query
+  status, list/download/delete backups, restore (from a stored file or a Telegram
+  message id), and change a whitelisted set of runtime settings. Long operations
+  run as async jobs (`202` + `GET /jobs/{id}`); when enabled the bundled
+  `pgbackup-api` becomes PID 1 and supervises `go-cron`. See `docs/REST_API.md`.
 - **Auto-discover databases** — set `POSTGRES_DB_AUTODISCOVER=TRUE` to back up
   every non-template database on the server. The built-in `postgres` maintenance
   database and anything in `POSTGRES_DB_EXCLUDE` are skipped, `POSTGRES_DB`

@@ -1,0 +1,43 @@
+# ─────────────────────────────────────────────────────────────
+# REST API — opt-in HTTP control surface (trigger/restore/download/config)
+# Binds the API to loopback only; place a TLS-terminating reverse proxy
+# in front before exposing to a network. See docs/REST_API.md.
+# ─────────────────────────────────────────────────────────────
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backup:
+    image: ganiyevuz/postgres-backup-telegram:17
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: mydb
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      SCHEDULE: "@daily"
+      # --- REST API control surface (opt-in) ---
+      REST_API_ENABLE: "TRUE"
+      REST_API_TOKEN: "${REST_API_TOKEN}"   # set in .env; never expose the port publicly without a reverse proxy/TLS
+    ports:
+      - "127.0.0.1:8081:8081"               # bound to loopback; front with a proxy for remote access
+    volumes:
+      - backups:/backups
+
+volumes:
+  pgdata:
+  backups:

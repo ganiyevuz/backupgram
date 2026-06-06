@@ -94,6 +94,7 @@ docker compose up -d
 - **Restore tooling** — interactive, by-file, cross-database, or **`--from-telegram`** disaster recovery.
 - **Safety** — backup verification, `pg_isready` and disk-space checks, `flock` against overlapping runs.
 - **Integrations** — webhooks (pre/post/error), custom `run-parts` hooks, Docker secrets (`*_FILE`).
+- **REST API (opt-in)** — trigger/observe/restore/download/delete backups and change runtime settings over HTTP, behind a bearer token. See [docs/REST_API.md](docs/REST_API.md).
 
 ---
 
@@ -106,6 +107,7 @@ docker compose up -d
 | [CLI Commands](docs/CLI.md) | `backup`, `restore`, `list`, `status`, `help` with example output |
 | [Architecture](docs/ARCHITECTURE.md) | Runtime chain, backup cycle, rotation model, format branches (C4 + mermaid) |
 | [Large Files](docs/LARGE_FILES.md) | MTProto upload for backups over 50 MB |
+| [REST API](docs/REST_API.md) | Optional HTTP control surface: endpoints, auth, runtime config |
 | [Build](docs/BUILD.md) | Multi-arch image builds |
 | [Changelog](CHANGELOG.md) | Notable changes |
 
