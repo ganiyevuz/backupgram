@@ -16,9 +16,18 @@ if [ "${BACKUP_ON_START}" = "TRUE" ]; then
   EXTRA_ARGS="-i"
 fi
 
-# Running the go-cron job
-echo "Starting cron job with schedule: $SCHEDULE and health check port: $HEALTHCHECK_PORT"
-if ! exec /usr/local/bin/go-cron -s "$SCHEDULE" -p "$HEALTHCHECK_PORT" $EXTRA_ARGS -- /backup.sh; then
-  echo "Error: go-cron job failed to start." >&2
-  exit 1
+# When the REST API is enabled, pgbackup-api becomes PID 1 and supervises go-cron
+# itself (schedule + healthcheck unchanged). Otherwise, exec go-cron directly.
+if [ "${REST_API_ENABLE}" = "TRUE" ]; then
+  echo "Starting REST API (port: ${REST_API_PORT}); it will supervise go-cron (schedule: $SCHEDULE)."
+  if ! exec /usr/local/bin/pgbackup-api; then
+    echo "Error: pgbackup-api failed to start." >&2
+    exit 1
+  fi
+else
+  echo "Starting cron job with schedule: $SCHEDULE and health check port: $HEALTHCHECK_PORT"
+  if ! exec /usr/local/bin/go-cron -s "$SCHEDULE" -p "$HEALTHCHECK_PORT" $EXTRA_ARGS -- /backup.sh; then
+    echo "Error: go-cron job failed to start." >&2
+    exit 1
+  fi
 fi
