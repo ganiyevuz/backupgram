@@ -16,7 +16,15 @@ echo ""
 echo "Configuration:"
 echo "  Host:       ${POSTGRES_HOST:-not set}"
 echo "  Port:       ${POSTGRES_PORT:-5432}"
-echo "  Databases:  ${POSTGRES_DB:-not set}"
+if [ "${POSTGRES_DB_AUTODISCOVER}" = "TRUE" ]; then
+  if [ -n "${POSTGRES_DB_EXCLUDE}" ]; then
+    echo "  Databases:  auto-discover (excluding: ${POSTGRES_DB_EXCLUDE})"
+  else
+    echo "  Databases:  auto-discover"
+  fi
+else
+  echo "  Databases:  ${POSTGRES_DB:-not set}"
+fi
 echo "  Schedule:   ${SCHEDULE:-@daily}"
 echo "  Cluster:    ${POSTGRES_CLUSTER:-FALSE}"
 echo "  Project:    ${PROJECT_NAME:-not set}"
