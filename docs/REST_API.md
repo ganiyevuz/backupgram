@@ -57,17 +57,68 @@ for a ready-to-run compose file.
 
 ## Authentication
 
-Every request (except `GET /healthz`) must include:
+The API key is a single **admin bearer token** you generate yourself and set on
+the container — there is no key-issuing endpoint. Every request (except
+`GET /healthz`) must include:
 
 ```
 Authorization: Bearer <token>
 ```
 
-A missing or wrong token returns `401 Unauthorized`. The token is set once at
-startup via `REST_API_TOKEN` (or its `_FILE` Docker-secret variant).
+A missing or wrong token returns `401 Unauthorized`. The token is compared in
+**constant time** (`crypto/subtle`), and the server is **fail-closed**: when
+`REST_API_ENABLE=TRUE` it refuses to start unless `REST_API_TOKEN` (or a readable
+`REST_API_TOKEN_FILE`) is set, so it never runs unauthenticated.
 
 `GET /healthz` is intentionally open so load-balancers and orchestrators can
 probe liveness without a credential.
+
+### Generate a token
+
+Use any high-entropy value (≥ 32 bytes of randomness):
+
+```sh
+openssl rand -base64 48
+# or
+openssl rand -hex 32
+# or
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Set it via `REST_API_TOKEN`, or — recommended for production — point
+`REST_API_TOKEN_FILE` at a Docker secret (it takes precedence over the plain
+env var):
+
+```yaml
+environment:
+  REST_API_ENABLE: "TRUE"
+  REST_API_TOKEN_FILE: /run/secrets/backupgram_token
+secrets:
+  - backupgram_token
+```
+
+### Validate / use a token
+
+Send it as the bearer header; only the correct token gets through:
+
+```sh
+TOKEN="…your token…"
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8081/healthz                       # 200 (no auth needed)
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8081/status                        # 401 (missing)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer wrong" http://localhost:8081/status   # 401
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" http://localhost:8081/status  # 200
+```
+
+In **django-backupgram**, paste the same token into the `BackupServer` *token*
+field; it is stored encrypted at rest and sent server-side — never exposed to the
+browser.
+
+### Rotate a token
+
+Generate a new value, update `REST_API_TOKEN` / the secret, recreate the
+container, and update the token wherever clients store it (e.g. the
+`BackupServer` record). There is no token database, expiry, or revocation list —
+rotation is simply replacing the value.
 
 ---
 
