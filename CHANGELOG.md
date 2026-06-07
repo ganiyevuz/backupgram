@@ -3,11 +3,31 @@
 All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Image tags track the bundled PostgreSQL major version (15–18) rather than a
-project semantic version, so changes are grouped under `[Unreleased]` until a
-release scheme is adopted.
+Image tags track the bundled PostgreSQL major version (15–18); project releases
+are tagged separately using CalVer (`YYYY.M.PATCH`, e.g. `2026.6.0`).
 
 ## [Unreleased]
+
+### Added
+- **`TELEGRAM_UPLOAD_METHOD` is now runtime-configurable** via the REST API —
+  `GET /config` reports it and `PATCH /config` accepts `smart` | `botapi` |
+  `mtproto`, so the transport can be changed without recreating the container.
+
+### Fixed
+- **Restore works non-interactively** — `restore.sh` skips the `[y/N]`
+  confirmation prompt when there is no TTY (the REST API and CI), instead of
+  aborting under `set -e`. It also **creates the target database if missing**, so
+  restoring into a fresh database (e.g. `restore … mydb_restore`) succeeds.
+- **`/status` reports the effective schedule** — it now reads the runtime
+  override (falling back to the environment) instead of the boot-time `SCHEDULE`,
+  so a schedule changed via `PATCH /config` is reflected immediately.
+
+### Security
+- **Restore hardening** — the restore target database name is single-quote
+  escaped before the existence check (no SQL injection) and passed to `createdb`
+  after `--` (a name beginning with `-` can't be parsed as a flag).
+
+## [2026.6.0] - 2026-06-07
 
 ### Added
 - **REST API control surface** — opt-in (`REST_API_ENABLE=TRUE`) HTTP API behind a
@@ -68,5 +88,15 @@ release scheme is adopted.
 - **Path-traversal hardening** — the Telegram-supplied filename used by
   `restore --from-telegram` is sanitized with `filepath.Base`, so a malicious
   message filename cannot write outside the download directory.
+- **REST API auth is fail-closed** — bearer tokens are compared in constant time
+  (`crypto/subtle`); the server refuses to start if `REST_API_ENABLE=TRUE` and no
+  readable token is configured, rather than starting unauthenticated.
+- **REST API path safety** — backup paths from API requests are resolved against
+  the backup root (`filepath.Base` + prefix check), so download/delete cannot
+  escape `BACKUP_DIR`; deletes additionally require `?confirm=true`.
+- **Injection-safe restore** — the restore target database name is regex-validated
+  and created via `createdb --`, and SQL identifiers are single-quote escaped, so
+  a crafted name cannot smuggle shell/SQL arguments.
 
-[Unreleased]: https://github.com/ganiyevuz/postgres-backup-telegram/commits/main
+[Unreleased]: https://github.com/ganiyevuz/docker-postgres-backup-tool/compare/2026.6.0...HEAD
+[2026.6.0]: https://github.com/ganiyevuz/docker-postgres-backup-tool/releases/tag/2026.6.0
