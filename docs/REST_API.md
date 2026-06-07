@@ -43,7 +43,7 @@ services:
       - backups:/backups
 ```
 
-See [`examples/docker-compose.rest-api.yml`](../examples/docker-compose.rest-api.yml)
+See [`examples/docker-compose.rest-api.yml`](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/examples/docker-compose.rest-api.yml)
 for a ready-to-run compose file.
 
 | Variable | Default | Description |

@@ -2,8 +2,9 @@
 
 > A pure-Bash Docker image that runs automated PostgreSQL backups on a cron
 > schedule, with rotating retention, Telegram delivery (Bot API + MTProto),
-> optional GPG encryption, webhooks, multi-chat fan-out, and built-in restore
-> tooling. Published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine]`.
+> optional GPG encryption, webhooks, multi-chat fan-out, auto-discovery of
+> databases, an optional HTTP REST control API, and built-in restore tooling.
+> Published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine]`.
 
 ## Core Files
 - [scripts/init.sh]: ENTRYPOINT — validates config, then execs go-cron with SCHEDULE
@@ -11,6 +12,7 @@
 - [scripts/backup.sh]: the backup cycle — dump, verify, encrypt, rotate, send to Telegram, prune
 - [scripts/restore.sh]: restore tooling — interactive, by file, cross-database, or --from-telegram
 - [tg-upload/]: Go binary (gotd/td) for MTProto upload/download of files up to 2 GB
+- [rest-api/]: Go module (net/http) for the optional REST control API; layered packages (httpx/config/backups/jobs/handlers/server/supervisor)
 - [hooks/]: run-parts hooks (pre-backup | post-backup | error); 00-webhook implements WEBHOOK_* vars
 - [docker/debian.Dockerfile, docker/alpine.Dockerfile]: image definitions; kept in lockstep (identical ENV + symlinks)
 - [generate-docker-bake.sh]: source of truth for docker-bake.hcl (generated — do not hand-edit)
@@ -19,6 +21,11 @@
 ## Documentation
 - [README.md]: quick start, environment variables, CLI commands, how backups work, hooks
 - [CHANGELOG.md]: notable changes (Keep a Changelog format)
+- [docs/GETTING_STARTED.md]: zero-to-restorable-backup walkthrough and troubleshooting
+- [docs/CONFIGURATION.md]: every environment variable, Docker secrets, retention math
+- [docs/CLI.md]: backup, restore, list, status, help with example output
+- [docs/ARCHITECTURE.md]: runtime chain, backup cycle, rotation model, format branches (C4 + mermaid)
+- [docs/REST_API.md]: optional HTTP control surface — endpoints, bearer auth, runtime config editing
 - [docs/BUILD.md]: multi-arch build with QEMU + buildx
 - [docs/LARGE_FILES.md]: MTProto large-file (>50 MB, up to 2 GB) upload route
 - [CLAUDE.md]: runtime architecture, build system, testing, and conventions for contributors
@@ -31,3 +38,5 @@
 - Restore by message id: backups embed a 🔖 Restore ID in their caption; restore --from-telegram fetches and restores it
 - Secrets precedence: *_FILE (Docker secrets) takes precedence over the plain env var
 - Scheduling/health: go-cron (prodrigestivill/go-cron) owns SCHEDULE and serves the healthcheck on HEALTHCHECK_PORT
+- Auto-discover: POSTGRES_DB_AUTODISCOVER backs up every non-template DB (minus postgres and POSTGRES_DB_EXCLUDE); POSTGRES_DB optional; ignored in cluster mode; an empty discovered set aborts the run
+- REST API: optional (REST_API_ENABLE) HTTP control surface behind a bearer token (REST_API_TOKEN); pgbackup-api becomes PID 1 and supervises go-cron; long ops run as async jobs (202 + GET /jobs/{id}); listens on REST_API_PORT (8081)

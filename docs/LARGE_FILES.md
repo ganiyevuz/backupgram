@@ -12,7 +12,7 @@ The image bundles `tg-upload`, a static binary that uploads over MTProto (up to 
    - `TELEGRAM_API_HASH`
 3. Leave `TELEGRAM_API_URL` unset (defaults to the official API).
 
-See [`examples/docker-compose.large-files-mtproto.yml`](../examples/docker-compose.large-files-mtproto.yml).
+See [`examples/docker-compose.large-files-mtproto.yml`](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/examples/docker-compose.large-files-mtproto.yml).
 
 **Targets:** the bot must be a member of the destination. Supergroups/channels (`-100…` ids) and basic groups work. Sending to an individual user requires that user to have started the bot.
 
@@ -24,7 +24,7 @@ See [`examples/docker-compose.large-files-mtproto.yml`](../examples/docker-compo
 
 Run the official `telegram-bot-api` daemon as a sidecar and point `TELEGRAM_API_URL` at it. The existing `curl` path then handles files up to 2 GB unchanged. This is heavier (an extra service + volume) but keeps everything on the Bot API.
 
-See [`examples/docker-compose.large-files-server.yml`](../examples/docker-compose.large-files-server.yml).
+See [`examples/docker-compose.large-files-server.yml`](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/examples/docker-compose.large-files-server.yml).
 
 ## Forcing a transport with `TELEGRAM_UPLOAD_METHOD`
 

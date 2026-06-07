@@ -1,6 +1,6 @@
 # Build Instructions
 
-Dockerfiles are located in the [`docker/`](../docker/) directory (`alpine.Dockerfile` and `debian.Dockerfile`).
+Dockerfiles are located in the [`docker/`](https://github.com/ganiyevuz/docker-postgres-backup-tool/tree/main/docker) directory (`alpine.Dockerfile` and `debian.Dockerfile`).
 
 ## Prerequisites
 

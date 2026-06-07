@@ -1,0 +1,81 @@
+site_name: postgres-backup-telegram
+site_description: >-
+  Automated PostgreSQL backups in Docker with rotating retention, Telegram
+  delivery, optional GPG encryption, an optional REST control API, and built-in
+  restore tooling.
+site_url: https://docker-postgres-backup-tool.readthedocs.io/
+repo_url: https://github.com/ganiyevuz/docker-postgres-backup-tool
+repo_name: ganiyevuz/docker-postgres-backup-tool
+edit_uri: edit/main/docs/
+copyright: Published as ganiyevuz/postgres-backup-telegram on Docker Hub
+
+# The Markdown guides already live in docs/; README.md is the site home.
+docs_dir: docs
+
+# Files in docs/ that are not part of the published site.
+exclude_docs: |
+  superpowers/
+  dockerhub-header.md
+
+theme:
+  name: material
+  language: en
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: README.md
+  - Getting Started: GETTING_STARTED.md
+  - Configuration: CONFIGURATION.md
+  - CLI Commands: CLI.md
+  - REST API: REST_API.md
+  - Large Files: LARGE_FILES.md
+  - Architecture: ARCHITECTURE.md
+  - Build: BUILD.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search

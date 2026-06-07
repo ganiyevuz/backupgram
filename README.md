@@ -4,6 +4,7 @@
 [![CI](https://github.com/ganiyevuz/docker-postgres-backup-telegram/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ganiyevuz/docker-postgres-backup-telegram/actions)
 ![License](https://img.shields.io/github/license/ganiyevuz/docker-postgres-backup-telegram)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%20%7C%2016%20%7C%2017%20%7C%2018-336791?logo=postgresql&logoColor=white)
+[![Documentation Status](https://readthedocs.org/projects/docker-postgres-backup-tool/badge/?version=latest)](https://docker-postgres-backup-tool.readthedocs.io/en/latest/)
 
 Automated PostgreSQL backups in Docker with rotating retention, Telegram notifications, optional GPG encryption, and built-in restore tooling.
 
@@ -89,6 +90,7 @@ docker compose up -d
 - **Scheduled backups** via `go-cron` with a configurable `SCHEDULE`.
 - **Rotating retention** — `last` / `daily` / `weekly` / `monthly` slots via space-saving hard links.
 - **Multiple databases** and **cluster-wide** dumps (`pg_dumpall`).
+- **Auto-discover databases** — back up every non-template database on the server (`POSTGRES_DB_AUTODISCOVER`), with an exclude list (`POSTGRES_DB_EXCLUDE`).
 - **Multiple formats** — gzip SQL, directory (`-Fd`), each optionally **GPG AES-256 encrypted**.
 - **Telegram delivery** — Bot API for small files, built-in **MTProto upload up to 2 GB**, multi-chat fan-out.
 - **Restore tooling** — interactive, by-file, cross-database, or **`--from-telegram`** disaster recovery.
@@ -123,6 +125,7 @@ secrets) variants that take precedence over the plain value. The most common:
 | Variable | Default | Description |
 |---|---|---|
 | `POSTGRES_HOST` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | **required** | Connection + database name(s) |
+| `POSTGRES_DB_AUTODISCOVER` | `FALSE` | Back up every non-template DB (makes `POSTGRES_DB` optional); exclude names via `POSTGRES_DB_EXCLUDE` |
 | `SCHEDULE` | `@daily` | Cron expression for the backup schedule |
 | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | `7` / `4` / `6` | Retention per rotation slot |
 | `BACKUP_ENCRYPTION_KEY` | `""` | GPG passphrase (enables AES-256 encryption) |
@@ -173,6 +176,7 @@ variables — add your own alongside it.
 - Use Docker secrets (`*_FILE` variables) instead of plain-text passwords in production.
 - Enable `BACKUP_ENCRYPTION_KEY` to encrypt backups at rest with GPG AES-256.
 - The healthcheck runs on an internal port (`8080` by default) — do not expose it publicly unless needed.
+- The optional **REST API** (`REST_API_ENABLE`) listens on `8081` (`REST_API_PORT`) behind a bearer token — bind it to loopback and front it with a TLS-terminating reverse proxy; never expose it directly. See [docs/REST_API.md](docs/REST_API.md).
 
 ### File permissions for the backup volume
 
