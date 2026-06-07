@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"pgbackupapi/jobs"
+	"backupgram/jobs"
 )
 
 func newTestHandlers(t *testing.T) *Handlers {

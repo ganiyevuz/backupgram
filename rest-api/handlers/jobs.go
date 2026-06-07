@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"pgbackupapi/backups"
-	"pgbackupapi/httpx"
+	"backupgram/backups"
+	"backupgram/httpx"
 )
 
 func (h *Handlers) Backup(w http.ResponseWriter, r *http.Request) {

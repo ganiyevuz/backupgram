@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"pgbackupapi/httpx"
+	"backupgram/httpx"
 )
 
 var ValidSlots = map[string]bool{"last": true, "daily": true, "weekly": true, "monthly": true}

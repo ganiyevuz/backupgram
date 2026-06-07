@@ -125,7 +125,7 @@ All webhook calls send a JSON payload with `status`, `hostname`, `timestamp`,
 
 | Variable | Default | Description |
 |---|---|---|
-| `REST_API_ENABLE` | `FALSE` | Set `TRUE` to run the HTTP control API (the bundled `pgbackup-api` becomes PID 1 and supervises `go-cron`). |
+| `REST_API_ENABLE` | `FALSE` | Set `TRUE` to run the HTTP control API (the bundled `backupgram-api` becomes PID 1 and supervises `go-cron`). |
 | `REST_API_PORT` | `8081` | Port the API listens on (separate from the `8080` healthcheck). |
 | `REST_API_TOKEN` | `""` | Admin bearer token. **Required** when the API is enabled. |
 | `REST_API_TOKEN_FILE` | `""` | Docker-secret path for the token (takes precedence over `REST_API_TOKEN`). |

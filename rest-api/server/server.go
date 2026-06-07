@@ -4,8 +4,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 
-	"pgbackupapi/handlers"
-	"pgbackupapi/httpx"
+	"backupgram/handlers"
+	"backupgram/httpx"
 )
 
 func authMiddleware(token string, next http.Handler) http.Handler {

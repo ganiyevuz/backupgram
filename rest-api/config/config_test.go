@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"pgbackupapi/httpx"
+	"backupgram/httpx"
 )
 
 func withBackupDir(t *testing.T) string {

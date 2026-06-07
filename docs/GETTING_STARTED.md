@@ -34,7 +34,7 @@ tag accordingly:
 
 | Your PostgreSQL | Debian tag | Alpine tag |
 |---|---|---|
-| 18 (newest) | `ganiyevuz/postgres-backup-telegram:18` (or `:latest`) | `…:18-alpine` (or `:alpine`) |
+| 18 (newest) | `ganiyevuz/backupgram:18` (or `:latest`) | `…:18-alpine` (or `:alpine`) |
 | 17 | `…:17` | `…:17-alpine` |
 | 16 | `…:16` | `…:16-alpine` |
 | 15 | `…:15` | `…:15-alpine` |
@@ -59,7 +59,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   backup:
-    image: ganiyevuz/postgres-backup-telegram:17
+    image: ganiyevuz/backupgram:17
     depends_on:
       - postgres
     environment:

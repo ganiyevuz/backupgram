@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"pgbackupapi/config"
-	"pgbackupapi/httpx"
+	"backupgram/config"
+	"backupgram/httpx"
 )
 
 func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {

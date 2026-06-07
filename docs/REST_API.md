@@ -19,13 +19,13 @@ as before.
 ## Enabling the API
 
 Set `REST_API_ENABLE=TRUE` and supply a token. When enabled, the bundled
-`pgbackup-api` binary becomes PID 1 and supervises `go-cron`; the cron
+`backupgram-api` binary becomes PID 1 and supervises `go-cron`; the cron
 schedule and the `8080` healthcheck endpoint are unchanged.
 
 ```yaml
 services:
   backup:
-    image: ganiyevuz/postgres-backup-telegram:17
+    image: ganiyevuz/backupgram:17
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_DB: mydb
@@ -43,7 +43,7 @@ services:
       - backups:/backups
 ```
 
-See [`examples/docker-compose.rest-api.yml`](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/examples/docker-compose.rest-api.yml)
+See [`examples/docker-compose.rest-api.yml`](https://github.com/ganiyevuz/backupgram/blob/main/examples/docker-compose.rest-api.yml)
 for a ready-to-run compose file.
 
 | Variable | Default | Description |

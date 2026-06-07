@@ -9,11 +9,11 @@ import (
 	"strings"
 	"syscall"
 
-	"pgbackupapi/config"
-	"pgbackupapi/handlers"
-	"pgbackupapi/jobs"
-	"pgbackupapi/server"
-	"pgbackupapi/supervisor"
+	"backupgram/config"
+	"backupgram/handlers"
+	"backupgram/jobs"
+	"backupgram/server"
+	"backupgram/supervisor"
 )
 
 func resolveToken() (string, error) {
@@ -75,7 +75,7 @@ func main() {
 	srv := &http.Server{Addr: ":" + getenvOr("REST_API_PORT", "8081"), Handler: server.Router(token, h)}
 
 	go func() {
-		log.Printf("pgbackup-api listening on %s", srv.Addr)
+		log.Printf("backupgram-api listening on %s", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

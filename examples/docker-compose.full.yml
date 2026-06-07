@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
 
   backup:
-    image: ganiyevuz/postgres-backup-telegram:17
+    image: ganiyevuz/backupgram:17
     depends_on:
       postgres:
         condition: service_healthy

@@ -23,7 +23,7 @@ jobs:
           DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKER_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
         with:
-          destination_container_repo: ${{ secrets.DOCKERHUB_USERNAME }}/postgres-backup-telegram
+          destination_container_repo: ${{ secrets.DOCKERHUB_USERNAME }}/backupgram
           provider: dockerhub
           short_description: 'Backup PostgreSQL locally with periodic rotation and Telegram bot integration.'
           readme_file: 'dockerhub.md'

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"pgbackupapi/jobs"
+	"backupgram/jobs"
 )
 
 func newJobsH(t *testing.T) *Handlers {

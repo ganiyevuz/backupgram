@@ -165,7 +165,7 @@ jobs:
           REST_API_TOKEN: "ci-secret"
           REST_API_PORT: "8099"
         run: |
-          go build -C rest-api -o /usr/local/bin/pgbackup-api .
+          go build -C rest-api -o /usr/local/bin/backupgram-api .
           # The API submits jobs that exec the in-image absolute paths; link the repo scripts there.
           sudo ln -sf "$PWD/scripts/env.sh" /env.sh
           sudo ln -sf "$PWD/scripts/backup.sh" /backup.sh
@@ -174,7 +174,7 @@ jobs:
           printf '#!/usr/bin/env bash\nexec sleep 86400\n' > /usr/local/bin/go-cron-stub
           chmod +x /usr/local/bin/go-cron-stub
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
-          GOCRON_BIN=/usr/local/bin/go-cron-stub /usr/local/bin/pgbackup-api &
+          GOCRON_BIN=/usr/local/bin/go-cron-stub /usr/local/bin/backupgram-api &
           APIPID=$!
           trap 'kill $APIPID 2>/dev/null || true' EXIT
           for i in $(seq 1 20); do curl -sf localhost:8099/healthz && break; sleep 0.5; done

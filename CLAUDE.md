@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Docker image (pure Bash, no application runtime) that runs automated PostgreSQL backups on a cron schedule, with rotating retention, Telegram delivery, optional GPG encryption, webhooks, and built-in restore tooling. Published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine]` for 4 PostgreSQL versions (15–18) × 2 base images (Debian/Alpine) × 2 platforms (amd64, arm64).
+A Docker image (pure Bash, no application runtime) that runs automated PostgreSQL backups on a cron schedule, with rotating retention, Telegram delivery, optional GPG encryption, webhooks, and built-in restore tooling. Published as `ganiyevuz/backupgram:<pg-version>[-alpine]` for 4 PostgreSQL versions (15–18) × 2 base images (Debian/Alpine) × 2 platforms (amd64, arm64).
 
 There is **no local build/lint/test toolchain** — everything is shell scripts baked into a Postgres-based image. Verification happens via the CI matrix (`.github/workflows/ci.yml`), which runs the scripts directly against a live `postgres:16` service container.
 

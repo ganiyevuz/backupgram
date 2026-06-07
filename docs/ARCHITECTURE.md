@@ -20,7 +20,7 @@ delivers to Telegram, and prunes.
 ```mermaid
 flowchart TB
     operator["Operator / DevOps<br/><i>configures env, runs CLI</i>"]
-    subgraph sys["postgres-backup-telegram (this image)"]
+    subgraph sys["backupgram (this image)"]
         runner["Backup runner<br/><i>Bash + go-cron</i>"]
     end
     pg[("PostgreSQL server<br/><i>source database(s)</i>")]

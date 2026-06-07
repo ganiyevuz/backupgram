@@ -16,7 +16,7 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   status, list/download/delete backups, restore (from a stored file or a Telegram
   message id), and change a whitelisted set of runtime settings. Long operations
   run as async jobs (`202` + `GET /jobs/{id}`); when enabled the bundled
-  `pgbackup-api` becomes PID 1 and supervises `go-cron`. See `docs/REST_API.md`.
+  `backupgram-api` becomes PID 1 and supervises `go-cron`. See `docs/REST_API.md`.
 - **Auto-discover databases** — set `POSTGRES_DB_AUTODISCOVER=TRUE` to back up
   every non-template database on the server. The built-in `postgres` maintenance
   database and anything in `POSTGRES_DB_EXCLUDE` are skipped, `POSTGRES_DB`
@@ -115,7 +115,7 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - `verify_backup` no longer fails on uncompressed (`-Z0`) dumps.
 - `encrypt_file` log output no longer pollutes the function's return value.
 
-[Unreleased]: https://github.com/ganiyevuz/docker-postgres-backup-tool/compare/2026.6.1...HEAD
-[2026.6.1]: https://github.com/ganiyevuz/docker-postgres-backup-tool/compare/2026.6.0...2026.6.1
-[2026.6.0]: https://github.com/ganiyevuz/docker-postgres-backup-tool/compare/2026.4.0...2026.6.0
-[2026.4.0]: https://github.com/ganiyevuz/docker-postgres-backup-tool/releases/tag/2026.4.0
+[Unreleased]: https://github.com/ganiyevuz/backupgram/compare/2026.6.1...HEAD
+[2026.6.1]: https://github.com/ganiyevuz/backupgram/compare/2026.6.0...2026.6.1
+[2026.6.0]: https://github.com/ganiyevuz/backupgram/compare/2026.4.0...2026.6.0
+[2026.4.0]: https://github.com/ganiyevuz/backupgram/releases/tag/2026.4.0

@@ -1,6 +1,6 @@
 # Build Instructions
 
-Dockerfiles are located in the [`docker/`](https://github.com/ganiyevuz/docker-postgres-backup-tool/tree/main/docker) directory (`alpine.Dockerfile` and `debian.Dockerfile`).
+Dockerfiles are located in the [`docker/`](https://github.com/ganiyevuz/backupgram/tree/main/docker) directory (`alpine.Dockerfile` and `debian.Dockerfile`).
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ docker buildx bake --pull
 Override image name or registry prefix:
 
 ```sh
-REGISTRY_PREFIX="yourusername/" IMAGE_NAME="postgres-backup-telegram" docker buildx bake --pull
+REGISTRY_PREFIX="yourusername/" IMAGE_NAME="backupgram" docker buildx bake --pull
 ```
 
 ## Build and push

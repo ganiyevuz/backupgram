@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"pgbackupapi/backups"
-	"pgbackupapi/config"
-	"pgbackupapi/httpx"
-	"pgbackupapi/jobs"
+	"backupgram/backups"
+	"backupgram/config"
+	"backupgram/httpx"
+	"backupgram/jobs"
 )
 
 // Handlers holds the dependencies the HTTP handlers need.

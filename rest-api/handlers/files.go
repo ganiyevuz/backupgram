@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"pgbackupapi/backups"
-	"pgbackupapi/httpx"
+	"backupgram/backups"
+	"backupgram/httpx"
 )
 
 func (h *Handlers) Download(w http.ResponseWriter, r *http.Request) {

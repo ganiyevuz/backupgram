@@ -37,6 +37,6 @@ Environment Variables:
   Project:      PROJECT_NAME
   Exclude:      POSTGRES_EXCLUDE_TABLES
 
-For full documentation: https://github.com/ganiyevuz/docker-postgres-backup-telegram
+For full documentation: https://github.com/ganiyevuz/backupgram
 ════════════════════════════════════════
 EOF

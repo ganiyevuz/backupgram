@@ -18,7 +18,7 @@ COPY rest-api/ ./
 ARG TARGETOS TARGETARCH TARGETVARIANT
 RUN GOARM="$(echo "${TARGETVARIANT}" | sed 's/^v//')" \
     GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
-    go build -trimpath -ldflags="-s -w" -o /out/pgbackup-api .
+    go build -trimpath -ldflags="-s -w" -o /out/backupgram-api .
 
 FROM postgres:$BASETAG
 
@@ -101,7 +101,7 @@ ENV POSTGRES_DB="" \
 # Vendored MTProto uploader for files >50MB (built in the tgbuilder stage)
 COPY --from=tgbuilder /out/tg-upload /usr/local/bin/tg-upload
 # REST API control server (built in the apibuilder stage)
-COPY --from=apibuilder /out/pgbackup-api /usr/local/bin/pgbackup-api
+COPY --from=apibuilder /out/backupgram-api /usr/local/bin/backupgram-api
 
 # Copy scripts and hooks
 COPY hooks/ /hooks/

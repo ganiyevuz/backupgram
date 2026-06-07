@@ -16,12 +16,12 @@ if [ "${BACKUP_ON_START}" = "TRUE" ]; then
   EXTRA_ARGS="-i"
 fi
 
-# When the REST API is enabled, pgbackup-api becomes PID 1 and supervises go-cron
+# When the REST API is enabled, backupgram-api becomes PID 1 and supervises go-cron
 # itself (schedule + healthcheck unchanged). Otherwise, exec go-cron directly.
 if [ "${REST_API_ENABLE}" = "TRUE" ]; then
   echo "Starting REST API (port: ${REST_API_PORT}); it will supervise go-cron (schedule: $SCHEDULE)."
-  if ! exec /usr/local/bin/pgbackup-api; then
-    echo "Error: pgbackup-api failed to start." >&2
+  if ! exec /usr/local/bin/backupgram-api; then
+    echo "Error: backupgram-api failed to start." >&2
     exit 1
   fi
 else

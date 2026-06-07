@@ -1,13 +1,13 @@
-site_name: postgres-backup-telegram
+site_name: backupgram
 site_description: >-
   Automated PostgreSQL backups in Docker with rotating retention, Telegram
   delivery, optional GPG encryption, an optional REST control API, and built-in
   restore tooling.
-site_url: https://docker-postgres-backup-tool.readthedocs.io/
-repo_url: https://github.com/ganiyevuz/docker-postgres-backup-tool
-repo_name: ganiyevuz/docker-postgres-backup-tool
+site_url: https://backupgram.readthedocs.io/
+repo_url: https://github.com/ganiyevuz/backupgram
+repo_name: ganiyevuz/backupgram
 edit_uri: edit/main/docs/
-copyright: Published as ganiyevuz/postgres-backup-telegram on Docker Hub
+copyright: Published as ganiyevuz/backupgram on Docker Hub
 
 # The Markdown guides already live in docs/; README.md is the site home.
 docs_dir: docs

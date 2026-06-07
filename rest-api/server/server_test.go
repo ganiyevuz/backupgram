@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"pgbackupapi/handlers"
-	"pgbackupapi/jobs"
+	"backupgram/handlers"
+	"backupgram/jobs"
 )
 
 func newTestHandlers(t *testing.T) *handlers.Handlers {

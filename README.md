@@ -1,10 +1,10 @@
-# postgres-backup-telegram
+# backupgram
 
-![Docker Pulls](https://img.shields.io/docker/pulls/ganiyevuz/postgres-backup-telegram)
-[![CI](https://github.com/ganiyevuz/docker-postgres-backup-telegram/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ganiyevuz/docker-postgres-backup-telegram/actions)
-![License](https://img.shields.io/github/license/ganiyevuz/docker-postgres-backup-telegram)
+![Docker Pulls](https://img.shields.io/docker/pulls/ganiyevuz/backupgram)
+[![CI](https://github.com/ganiyevuz/backupgram/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ganiyevuz/backupgram/actions)
+![License](https://img.shields.io/github/license/ganiyevuz/backupgram)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%20%7C%2016%20%7C%2017%20%7C%2018-336791?logo=postgresql&logoColor=white)
-[![Documentation Status](https://readthedocs.org/projects/docker-postgres-backup-tool/badge/?version=latest)](https://docker-postgres-backup-tool.readthedocs.io/en/latest/)
+[![Documentation Status](https://readthedocs.org/projects/backupgram/badge/?version=latest)](https://backupgram.readthedocs.io/en/latest/)
 
 Automated PostgreSQL backups in Docker with rotating retention, Telegram notifications, optional GPG encryption, and built-in restore tooling.
 
@@ -28,7 +28,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   backup:
-    image: ganiyevuz/postgres-backup-telegram:17
+    image: ganiyevuz/backupgram:17
     depends_on:
       - postgres
     environment:
@@ -192,7 +192,7 @@ mkdir -p /var/opt/pgbackups && chown -R 70:70 /var/opt/pgbackups
 
 ## Image Tags
 
-Images are published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine]`.
+Images are published as `ganiyevuz/backupgram:<pg-version>[-alpine]`.
 
 | Tag | Base | PostgreSQL |
 |---|---|---|

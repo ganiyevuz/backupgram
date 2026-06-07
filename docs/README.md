@@ -1,6 +1,6 @@
 # Documentation
 
-Documentation for **postgres-backup-telegram** — automated PostgreSQL backups in
+Documentation for **backupgram** — automated PostgreSQL backups in
 Docker with rotating retention, Telegram delivery, GPG encryption, webhooks, and
 built-in restore tooling.
 
@@ -22,7 +22,7 @@ New here? Start with **[Getting Started](GETTING_STARTED.md)**.
 
 | File | Purpose |
 |---|---|
-| [README.md](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/README.md) | Project overview and quick start |
-| [CHANGELOG.md](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/CHANGELOG.md) | Notable changes (Keep a Changelog) |
-| [CLAUDE.md](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/CLAUDE.md) | Contributor guide: runtime architecture, build system, testing, conventions |
-| [llms.txt](https://github.com/ganiyevuz/docker-postgres-backup-tool/blob/main/llms.txt) | Machine-readable project map for AI agents |
+| [README.md](https://github.com/ganiyevuz/backupgram/blob/main/README.md) | Project overview and quick start |
+| [CHANGELOG.md](https://github.com/ganiyevuz/backupgram/blob/main/CHANGELOG.md) | Notable changes (Keep a Changelog) |
+| [CLAUDE.md](https://github.com/ganiyevuz/backupgram/blob/main/CLAUDE.md) | Contributor guide: runtime architecture, build system, testing, conventions |
+| [llms.txt](https://github.com/ganiyevuz/backupgram/blob/main/llms.txt) | Machine-readable project map for AI agents |

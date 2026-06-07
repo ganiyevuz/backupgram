@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"pgbackupapi/config"
+	"backupgram/config"
 )
 
 func newConfigH(t *testing.T) *Handlers {

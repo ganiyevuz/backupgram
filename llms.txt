@@ -1,10 +1,10 @@
-# postgres-backup-telegram
+# backupgram
 
 > A pure-Bash Docker image that runs automated PostgreSQL backups on a cron
 > schedule, with rotating retention, Telegram delivery (Bot API + MTProto),
 > optional GPG encryption, webhooks, multi-chat fan-out, auto-discovery of
 > databases, an optional HTTP REST control API, and built-in restore tooling.
-> Published as `ganiyevuz/postgres-backup-telegram:<pg-version>[-alpine]`.
+> Published as `ganiyevuz/backupgram:<pg-version>[-alpine]`.
 
 ## Core Files
 - [scripts/init.sh]: ENTRYPOINT — validates config, then execs go-cron with SCHEDULE
@@ -39,4 +39,4 @@
 - Secrets precedence: *_FILE (Docker secrets) takes precedence over the plain env var
 - Scheduling/health: go-cron (prodrigestivill/go-cron) owns SCHEDULE and serves the healthcheck on HEALTHCHECK_PORT
 - Auto-discover: POSTGRES_DB_AUTODISCOVER backs up every non-template DB (minus postgres and POSTGRES_DB_EXCLUDE); POSTGRES_DB optional; ignored in cluster mode; an empty discovered set aborts the run
-- REST API: optional (REST_API_ENABLE) HTTP control surface behind a bearer token (REST_API_TOKEN); pgbackup-api becomes PID 1 and supervises go-cron; long ops run as async jobs (202 + GET /jobs/{id}); listens on REST_API_PORT (8081)
+- REST API: optional (REST_API_ENABLE) HTTP control surface behind a bearer token (REST_API_TOKEN); backupgram-api becomes PID 1 and supervises go-cron; long ops run as async jobs (202 + GET /jobs/{id}); listens on REST_API_PORT (8081)
