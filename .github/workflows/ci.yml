@@ -181,6 +181,9 @@ jobs:
       - name: "Scenario: list/status hide dot files, see the lock"
         run: bash tests/scenarios.sh list_status_hide_dot_files
 
+      - name: "Scenario: wrong key on an encrypted SQL dump"
+        run: bash tests/scenarios.sh restore_wrong_key_sql
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

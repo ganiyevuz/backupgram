@@ -182,6 +182,12 @@ fi
 
 RESTORE_FILE="${BACKUP_FILE}"
 
+# A decryption failure: the wrong key or a damaged file. Nothing was restored.
+unreadable_backup() {
+  echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
+  exit 1
+}
+
 # Step 1: GPG-encrypted backups are decrypted with a passphrase file, never a
 # command-line key. Custom-format and SQL dumps stream straight into the restore
 # (no clear copy on disk); only a tar-archived directory dump needs a temp file.
@@ -196,13 +202,13 @@ if [[ "${RESTORE_FILE}" == *.gpg ]]; then
   if [[ "${RESTORE_FILE%.gpg}" == *.tar.gz ]]; then
     echo "🔓 Decrypting backup..."
     DECRYPTED_FILE="/tmp/$(basename "${RESTORE_FILE%.gpg}")"
+    # Registered before gpg runs, so a failed or partial decrypt leaves no clear text behind.
+    TEMP_FILES="${TEMP_FILES} ${DECRYPTED_FILE}"
     if ! gpg --batch --yes --quiet --no-symkey-cache --decrypt --passphrase-file "${KEYFILE}" \
       -o "${DECRYPTED_FILE}" "${RESTORE_FILE}"; then
-      echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
-      exit 1
+      unreadable_backup
     fi
     RESTORE_FILE="${DECRYPTED_FILE}"
-    TEMP_FILES="${TEMP_FILES} ${DECRYPTED_FILE}"
   else
     echo "🔓 Decrypting backup into the restore stream..."
     STREAM_DECRYPT="TRUE"
@@ -216,6 +222,17 @@ backup_stream() {
   else
     cat "${RESTORE_FILE}"
   fi
+}
+# After a failed `backup_stream | …` pipeline, called as
+#   stream_failure "$?" "${PIPESTATUS[0]}"
+# (both expanded in the same command, before either is reset). A failing gpg, the
+# first stage, means the backup could not be read: exit 1 with a clear message.
+# Any other failure is returned for the caller to treat as fatal or as a warning.
+stream_failure() {
+  if [ "${STREAM_DECRYPT}" = "TRUE" ] && [ "$2" -ne 0 ]; then
+    unreadable_backup
+  fi
+  return "$1"
 }
 # Without .gpg, the name tells the format.
 RESTORE_NAME="${RESTORE_FILE%.gpg}"
@@ -258,27 +275,23 @@ elif [[ "${RESTORE_NAME}" == *.sql.gz ]]; then
   echo "📄 Detected compressed SQL dump."
   if echo "${BACKUP_FILE}" | grep -q "cluster"; then
     echo "🌐 Cluster dump detected. Restoring all databases..."
-    backup_stream | gunzip -c | psql -d postgres
+    backup_stream | gunzip -c | psql -d postgres \
+      || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?
   else
-    backup_stream | gunzip -c | psql -d "${TARGET_DB}"
+    backup_stream | gunzip -c | psql -d "${TARGET_DB}" \
+      || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?
   fi
 elif [[ "${RESTORE_NAME}" == *.sql ]]; then
   # Plain SQL dump
   echo "📄 Detected plain SQL dump."
-  backup_stream | psql -d "${TARGET_DB}"
+  backup_stream | psql -d "${TARGET_DB}" \
+    || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?
 elif [ "${STREAM_DECRYPT}" = "TRUE" ]; then
   # Encrypted archive (custom format): decrypt straight into pg_restore
   echo "📦 Attempting pg_restore (archive format)..."
-  if backup_stream | pg_restore -d "${TARGET_DB}" --clean --if-exists 2>&1; then
-    :
-  else
-    RESTORE_STATUS=("${PIPESTATUS[@]}")
-    if [ "${RESTORE_STATUS[0]}" -ne 0 ]; then
-      echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
-      exit 1
-    fi
-    echo "⚠️ pg_restore completed with warnings."
-  fi
+  backup_stream | pg_restore -d "${TARGET_DB}" --clean --if-exists 2>&1 \
+    || stream_failure "$?" "${PIPESTATUS[0]}" \
+    || echo "⚠️ pg_restore completed with warnings."
 else
   # Try pg_restore (custom/archive format)
   echo "📦 Attempting pg_restore (archive format)..."

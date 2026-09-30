@@ -389,6 +389,42 @@ scenario_restore_encrypted_custom() {
   psql_su -d postgres -c "DROP DATABASE restored_probe WITH (FORCE)"
 }
 
+# A wrong key must give the same clear error on the streamed SQL dumps: the default
+# encrypted plain gzip dump (.sql.gz.gpg) and an encrypted uncompressed one (.sql.gpg).
+scenario_restore_wrong_key_sql() {
+  fresh_backup_dir
+  local file kind got
+  psql_su -d database -c "DROP TABLE IF EXISTS restore_probe" -c "CREATE TABLE restore_probe (id int)" \
+    -c "INSERT INTO restore_probe SELECT generate_series(1, 42)"
+  for kind in gz plain; do
+    psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_sql WITH (FORCE)"
+    fresh_backup_dir
+    if [ "${kind}" = "gz" ]; then
+      POSTGRES_EXTRA_OPTS="-Z1" BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" run_backup
+      file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz.gpg')"
+    else
+      POSTGRES_EXTRA_OPTS="" BACKUP_SUFFIX=".sql" BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" run_backup
+      file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gpg')"
+    fi
+    expect_rc 0 "encrypted ${kind} backup"
+    set +e
+    RUN_OUT="$(BACKUP_ENCRYPTION_KEY="wrong" bash "${RESTORE_SH}" "${file}" restored_sql < /dev/null 2>&1)"
+    RUN_RC=$?
+    set -e
+    expect_rc 1 "${kind}: restore with the wrong key"
+    expect_out "Could not read the backup"
+    got="$(psql_su -d restored_sql -tAc "SELECT coalesce(to_regclass('restore_probe')::text, 'none')")"
+    [ "${got}" = "none" ] || fail "${kind}: the failed restore loaded data: ${got}"
+    set +e
+    RUN_OUT="$(BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" bash "${RESTORE_SH}" "${file}" restored_sql < /dev/null 2>&1)"
+    RUN_RC=$?
+    set -e
+    expect_rc 0 "${kind}: restore with the right key"
+    [ "$(psql_su -d restored_sql -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "${kind}: restored rows"
+  done
+  psql_su -d postgres -c "DROP DATABASE restored_sql WITH (FORCE)"
+}
+
 # Pharmakon's backup-runner restores one branch: gpg --decrypt | pg_restore -n br<nn>.
 scenario_pharmakon_branch_restore() {
   load_pharmakon_fixture
