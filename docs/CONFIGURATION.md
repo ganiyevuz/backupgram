@@ -147,7 +147,7 @@ or removed from `POSTGRES_DB`) ages out normally. See [Retention Math](#retentio
 
 | Variable | Default | Description |
 |---|---|---|
-| `BACKUP_ENCRYPTION_KEY` | `""` | GPG passphrase for AES-256 encryption. Leave empty to disable. When set, an extra `.gpg` suffix is appended and the file is symmetrically encrypted. |
+| `BACKUP_ENCRYPTION_KEY` | `""` | GPG passphrase for AES-256 encryption. Leave empty to disable. When set, an extra `.gpg` suffix is appended and the file is symmetrically encrypted. Must be a single line: a key containing a newline is refused at startup (gpg reads only the first line of the passphrase file). |
 
 The dump is piped straight into GPG, so nothing unencrypted is ever written to
 disk. The key reaches GPG through a temporary passphrase file (mode `0600`,

@@ -19,6 +19,9 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - The lock moved from `/tmp/backup.lock` to `${BACKUP_DIR}/.lock`, so containers sharing
   a backup volume also run one at a time.
 - Every file of a run carries the run's start time (it was each database's dump time).
+- A `BACKUP_ENCRYPTION_KEY` containing a newline is refused at startup (`❌
+  BACKUP_ENCRYPTION_KEY must be a single line …`): gpg reads only the first line of
+  the passphrase file, so the rest of such a key was silently ignored.
 
 ### Fixed
 - Encryption no longer writes an unencrypted dump to disk first: `pg_dump` is piped into

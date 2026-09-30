@@ -227,6 +227,11 @@ esac
 
 # Encryption (optional)
 if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
+  # A second line would be written to the passphrase file and silently dropped by gpg.
+  if [[ "${BACKUP_ENCRYPTION_KEY}" == *$'\n'* ]]; then
+    echo "❌ BACKUP_ENCRYPTION_KEY must be a single line (gpg reads only the first line of the passphrase file)." >&2
+    exit 1
+  fi
   if command -v gpg >/dev/null 2>&1; then
     echo "✅ Backup encryption enabled (GPG)."
   else
