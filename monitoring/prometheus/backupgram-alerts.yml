@@ -1,0 +1,42 @@
+# Alert rules for backupgram's metrics (docs/MONITORING.md). Load them in Prometheus
+# with rule_files. The thresholds assume a daily SCHEDULE: adjust them to yours.
+groups:
+  - name: backupgram
+    rules:
+      - alert: BackupgramBackupTooOld
+        # 26 h: one missed nightly run plus slack. Also fires when the container is dead,
+        # because the timestamp comes from the newest file on disk.
+        expr: time() - backupgram_backup_last_timestamp_seconds > 26 * 3600
+        labels: { severity: warning }
+        annotations:
+          summary: "The newest {{ $labels.project }} {{ $labels.database }} backup is {{ $value | humanizeDuration }} old"
+          description: "The scheduled dump did not happen. Check the backup container's log."
+
+      - alert: BackupgramBackupMissedTwice
+        # 50 h: two nightly runs missed.
+        expr: time() - backupgram_backup_last_timestamp_seconds > 50 * 3600
+        labels: { severity: critical }
+        annotations:
+          summary: "No {{ $labels.project }} {{ $labels.database }} backup for {{ $value | humanizeDuration }}"
+
+      - alert: BackupgramBackupFailed
+        expr: backupgram_backup_success == 0
+        labels: { severity: warning }
+        annotations:
+          summary: "The last {{ $labels.project }} {{ $labels.database }} backup failed"
+          description: "Its previous dump is kept. The container's log says why."
+
+      - alert: BackupgramBackupShrank
+        expr: backupgram_backup_last_size_bytes < 0.5 * max_over_time(backupgram_backup_last_size_bytes[8d])
+        labels: { severity: warning }
+        annotations:
+          summary: "The newest {{ $labels.project }} {{ $labels.database }} dump is less than half the largest of 8 days"
+          description: "A dump cut short, or a lot of data gone. Check it before relying on it."
+
+      - alert: BackupgramLowDisk
+        # 1 GiB: raise it for large databases (a dump needs room for itself before the old one goes).
+        expr: backupgram_disk_available_bytes < 1073741824
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Less than 1 GiB free for {{ $labels.project }}'s backups"

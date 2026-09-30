@@ -166,6 +166,12 @@ jobs:
       - name: "Scenario: BACKUP_GID permissions"
         run: bash tests/scenarios.sh gid_permissions
 
+      - name: "Scenario: metrics textfile (promtool)"
+        run: bash tests/scenarios.sh metrics_textfile
+
+      - name: "Scenario: alert rules and dashboard"
+        run: bash tests/scenarios.sh monitoring_assets
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

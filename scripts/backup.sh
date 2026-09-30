@@ -22,6 +22,8 @@ source "${SCRIPT_DIR}/lib/dump.sh"
 source "${SCRIPT_DIR}/lib/discover.sh"
 # shellcheck source=scripts/lib/rls_guard.sh
 source "${SCRIPT_DIR}/lib/rls_guard.sh"
+# shellcheck source=scripts/lib/metrics.sh
+source "${SCRIPT_DIR}/lib/metrics.sh"
 
 # One run at a time, across every container that shares BACKUP_DIR. A second run
 # exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
@@ -41,6 +43,19 @@ prepare_backup_dir
 prepare_keyfile
 detect_dump_format
 
+# Results per database, for the metrics
+BACKUP_SUCCESS=0
+BACKUP_FAILED=0
+FAILED_DBS=""
+DISCOVER_SKIPPED=""
+declare -A DB_OK=() DB_SECONDS=()
+
+# A run that stops before the databases: record it as failed, exit 1.
+abort_run() {
+  write_metrics 1 || echo "⚠️ Could not write the metrics." >&2
+  exit 1
+}
+
 # Pre-backup hook
 if [ -d "${HOOKS_DIR}" ]; then
   run-parts -a "pre-backup" --exit-on-error "${HOOKS_DIR}"
@@ -51,17 +66,16 @@ POSTGRES_CONNECT_TIMEOUT="${POSTGRES_CONNECT_TIMEOUT:-30}"
 echo "Checking database connectivity (timeout: ${POSTGRES_CONNECT_TIMEOUT}s)..."
 if ! pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -t "${POSTGRES_CONNECT_TIMEOUT}" -q 2>/dev/null; then
   echo "❌ Database is not reachable at ${PGHOST}:${PGPORT}. Aborting backup." >&2
-  exit 1
+  abort_run
 fi
 echo "✅ Database is reachable."
 
 # Auto-discover databases (opt-in). Runs only after connectivity is confirmed.
-DISCOVER_SKIPPED=""
 if [ "${POSTGRES_DB_AUTODISCOVER}" = "TRUE" ]; then
   if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
     echo "ℹ️ Auto-discover ignored: cluster mode dumps the whole cluster via pg_dumpall."
   elif ! discover_databases; then
-    exit 1
+    abort_run
   fi
 fi
 
@@ -70,7 +84,7 @@ BACKUP_MIN_DISK_SPACE="${BACKUP_MIN_DISK_SPACE:-100}"
 AVAILABLE_MB=$(df -m "${BACKUP_DIR}" 2>/dev/null | awk 'NR==2 {print $4}')
 if [ -n "${AVAILABLE_MB}" ] && [ "${AVAILABLE_MB}" -lt "${BACKUP_MIN_DISK_SPACE}" ]; then
   echo "❌ Low disk space: ${AVAILABLE_MB}MB available, ${BACKUP_MIN_DISK_SPACE}MB required. Aborting." >&2
-  exit 1
+  abort_run
 fi
 echo "✅ Disk space OK (${AVAILABLE_MB}MB available)."
 
@@ -253,11 +267,6 @@ send_telegram_message() {
   done
 }
 
-# Track backup results
-BACKUP_SUCCESS=0
-BACKUP_FAILED=0
-FAILED_DBS=""
-
 # One database (or the cluster): dump to last/.<name>.part, accept it only if the
 # dump succeeded, is big enough and reads back in full, then rename it into place
 # and link it into the other folders. Any failure keeps the previous dump.
@@ -317,10 +326,13 @@ for DB in "${DBS[@]}"; do
   DB_START_TIME=$(date +%s)
   if backup_database "${DB}"; then
     BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
+    DB_OK["${DB}"]=1
   else
     BACKUP_FAILED=$((BACKUP_FAILED + 1))
     FAILED_DBS="${FAILED_DBS} ${DB}"
+    DB_OK["${DB}"]=0
   fi
+  DB_SECONDS["${DB}"]=$(( $(date +%s) - DB_START_TIME ))
 done
 
 # Dropped databases leave last/ (snapshot layout; needs a successful server listing)
@@ -333,6 +345,13 @@ if [ "${BACKUP_SUCCESS}" -gt 0 ]; then
 else
   echo "⚠️ No database was backed up this run; retention skipped." >&2
 fi
+
+# Metrics (never fail the backup)
+RUN_RC=0
+if [ "${BACKUP_FAILED}" -gt 0 ]; then
+  RUN_RC=1
+fi
+write_metrics "${RUN_RC}" || echo "⚠️ Could not write the metrics." >&2
 
 # Backup summary
 BACKUP_END_TIME=$(date +%s)

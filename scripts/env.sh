@@ -200,8 +200,7 @@ done
 unset _uint_var
 
 # TRUE/FALSE settings
-# shellcheck disable=SC2043  # a list on purpose: more boolean settings join it
-for _bool_var in BACKUP_RLS_GUARD; do
+for _bool_var in BACKUP_RLS_GUARD METRICS_ENABLE; do
   case "${!_bool_var:-FALSE}" in
     TRUE | FALSE) ;;
     *)
@@ -211,6 +210,11 @@ for _bool_var in BACKUP_RLS_GUARD; do
   esac
 done
 unset _bool_var
+
+if [ -n "${METRICS_TEXTFILE_DIR}" ] && { [ ! -d "${METRICS_TEXTFILE_DIR}" ] || [ ! -w "${METRICS_TEXTFILE_DIR}" ]; }; then
+  echo "❌ METRICS_TEXTFILE_DIR must be a writable directory (got '${METRICS_TEXTFILE_DIR}')." >&2
+  exit 1
+fi
 
 BACKUP_LAYOUT="${BACKUP_LAYOUT:-period}"
 case "${BACKUP_LAYOUT}" in

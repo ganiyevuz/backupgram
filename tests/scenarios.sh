@@ -315,6 +315,42 @@ scenario_gid_permissions() {
   expect_out "BACKUP_GID must be a whole number"
 }
 
+scenario_metrics_textfile() {
+  fresh_backup_dir
+  local dir file
+  dir="$(mktemp -d)"
+  METRICS_ENABLE="TRUE" METRICS_TEXTFILE_DIR="${dir}" run_backup
+  expect_rc 0 "metrics on"
+  file="${dir}/backupgram-CI_Test.prom"
+  [ -f "${file}" ] || fail "no textfile at ${file}"
+  cmp -s "${file}" "${BACKUP_DIR}/.metrics.prom" || fail "the textfile and .metrics.prom differ"
+  [ "$(stat -c %a "${file}")" = "644" ] || fail "the textfile is not world-readable"
+  grep -qx 'backupgram_backup_success{project="CI Test",database="database"} 1' "${file}" || fail "success series"
+  grep -qx 'backupgram_run_success{project="CI Test"} 1' "${file}" || fail "run_success"
+  grep -qx 'backupgram_run_databases{project="CI Test",result="ok"} 1' "${file}" || fail "run_databases ok"
+  grep -qE '^backupgram_backup_last_timestamp_seconds\{project="CI Test",database="database"\} [0-9]+$' "${file}" || fail "last timestamp"
+  grep -qE '^backupgram_backup_last_size_bytes\{project="CI Test",database="database"\} [1-9][0-9]*$' "${file}" || fail "last size"
+  grep -qx 'backupgram_backup_files{project="CI Test",slot="daily"} 1' "${file}" || fail "files per slot"
+  grep -qE '^backupgram_disk_available_bytes\{project="CI Test"\} [1-9][0-9]*$' "${file}" || fail "disk available"
+  promtool check metrics < "${file}" || fail "promtool rejects the metrics"
+  sleep 1
+  POSTGRES_DB="database,no_such_db" METRICS_TEXTFILE_DIR="${dir}" run_backup
+  expect_rc 1 "one database missing"
+  grep -qx 'backupgram_backup_success{project="CI Test",database="no_such_db"} 0' "${file}" || fail "failed series"
+  grep -qx 'backupgram_run_success{project="CI Test"} 0' "${file}" || fail "run_success after a failure"
+  POSTGRES_HOST="127.0.0.1" POSTGRES_PORT="1" POSTGRES_CONNECT_TIMEOUT=1 METRICS_TEXTFILE_DIR="${dir}" run_backup
+  expect_rc 1 "unreachable server"
+  grep -qx 'backupgram_run_success{project="CI Test"} 0' "${file}" || fail "an aborted run did not write metrics"
+  rm -rf "${dir}"
+}
+
+scenario_monitoring_assets() {
+  promtool check rules "${REPO_DIR}/monitoring/prometheus/backupgram-alerts.yml" || fail "alert rules"
+  jq -e '.panels | length >= 6' "${REPO_DIR}/monitoring/grafana/backupgram.json" >/dev/null || fail "dashboard panels"
+  jq -e '[.panels[].targets[]?.expr] | all(test("backupgram_"))' "${REPO_DIR}/monitoring/grafana/backupgram.json" >/dev/null \
+    || fail "a dashboard query does not use a backupgram_ metric"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then
