@@ -66,6 +66,11 @@ if [ -n "${POSTGRES_DB_EXCLUDE}" ] && [ "${POSTGRES_DB_AUTODISCOVER}" != "TRUE" 
   echo "ℹ️ POSTGRES_DB_EXCLUDE ignored (auto-discover is off)."
 fi
 
+# POSTGRES_DB_INCLUDE likewise only filters auto-discovered names.
+if [ -n "${POSTGRES_DB_INCLUDE}" ] && [ "${POSTGRES_DB_AUTODISCOVER}" != "TRUE" ]; then
+  echo "ℹ️ POSTGRES_DB_INCLUDE ignored (auto-discover is off)."
+fi
+
 if [ -z "${POSTGRES_USER_FILE}" ]; then
   export PGUSER="${POSTGRES_USER}"
 elif [ -r "${POSTGRES_USER_FILE}" ]; then

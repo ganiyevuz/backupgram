@@ -18,6 +18,8 @@ source "${SCRIPT_DIR}/env.sh"
 source "${SCRIPT_DIR}/lib/layout.sh"
 # shellcheck source=scripts/lib/dump.sh
 source "${SCRIPT_DIR}/lib/dump.sh"
+# shellcheck source=scripts/lib/discover.sh
+source "${SCRIPT_DIR}/lib/discover.sh"
 
 # One run at a time, across every container that shares BACKUP_DIR. A second run
 # exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
@@ -52,38 +54,12 @@ fi
 echo "✅ Database is reachable."
 
 # Auto-discover databases (opt-in). Runs only after connectivity is confirmed.
+DISCOVER_SKIPPED=""
 if [ "${POSTGRES_DB_AUTODISCOVER}" = "TRUE" ]; then
   if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
     echo "ℹ️ Auto-discover ignored: cluster mode dumps the whole cluster via pg_dumpall."
-  else
-    echo "🔍 Auto-discovering databases..."
-    # Constant SQL: skip templates, non-connectable DBs, and the built-in
-    # 'postgres' maintenance DB. User excludes are applied in Bash below, so
-    # POSTGRES_DB_EXCLUDE is never interpolated into SQL (no injection surface).
-    if ! DISCOVERED=$(psql -d postgres -tAc \
-      "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate AND datname <> 'postgres' ORDER BY datname"); then
-      echo "❌ Error: database auto-discovery query failed. Aborting." >&2
-      exit 1
-    fi
-
-    POSTGRES_DBS=""
-    # shellcheck disable=SC2086
-    for _ad_db in ${DISCOVERED}; do
-      _ad_skip="false"
-      # Exclude list is comma-delimited; database names containing spaces are not supported (matches POSTGRES_EXCLUDE_TABLES).
-      # shellcheck disable=SC2086
-      for _ad_ex in ${POSTGRES_DB_EXCLUDE//,/ }; do
-        if [ "${_ad_db}" = "${_ad_ex}" ]; then _ad_skip="true"; break; fi
-      done
-      [ "${_ad_skip}" = "false" ] && POSTGRES_DBS="${POSTGRES_DBS} ${_ad_db}"
-    done
-    POSTGRES_DBS=$(echo "${POSTGRES_DBS}" | xargs)  # trim surrounding whitespace
-
-    if [ -z "${POSTGRES_DBS}" ]; then
-      echo "❌ Auto-discover found no databases to back up (after exclusions). Aborting." >&2
-      exit 1
-    fi
-    echo "✅ Auto-discovered $(echo "${POSTGRES_DBS}" | wc -w | tr -d ' ') database(s): ${POSTGRES_DBS}"
+  elif ! discover_databases; then
+    exit 1
   fi
 fi
 
@@ -353,7 +329,10 @@ fi
 BACKUP_END_TIME=$(date +%s)
 BACKUP_DURATION=$((BACKUP_END_TIME - BACKUP_START_TIME))
 echo "────────────────────────────────────────"
-echo "Backup completed in ${BACKUP_DURATION}s: ${BACKUP_SUCCESS} succeeded, ${BACKUP_FAILED} failed"
+echo "Backup completed in ${BACKUP_DURATION}s: ${BACKUP_SUCCESS} succeeded, ${BACKUP_FAILED} failed, $(wc -w <<< "${DISCOVER_SKIPPED}" | tr -d ' ') skipped"
+if [ "${BACKUP_FAILED}" -gt 0 ]; then
+  echo "❌ Failed: $(echo "${FAILED_DBS}" | xargs)" >&2
+fi
 echo "────────────────────────────────────────"
 
 # Write health status file

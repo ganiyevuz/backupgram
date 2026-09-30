@@ -151,6 +151,9 @@ jobs:
       - name: "Scenario: no retention when every database failed"
         run: bash tests/scenarios.sh retention_skipped_when_nothing_succeeded
 
+      - name: "Scenario: Pharmakon discovery (include globs, no-CONNECT skip)"
+        run: bash tests/scenarios.sh pharmakon_discovery
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

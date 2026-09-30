@@ -177,6 +177,41 @@ scenario_formats_still_work() {
   only_file "${BACKUP_DIR}/last" 'cluster-[0-9]*.sql.gz.gpg' >/dev/null
 }
 
+scenario_pharmakon_discovery() {
+  load_pharmakon_fixture
+  fresh_backup_dir
+  local list db
+  export POSTGRES_USER="svc_backup" POSTGRES_PASSWORD="${SVC_PASSWORD}" POSTGRES_DB=""
+  export POSTGRES_DB_AUTODISCOVER="TRUE" POSTGRES_DB_INCLUDE="control,pharmacy_*"
+  export POSTGRES_EXTRA_OPTS="-Fc --enable-row-security --lock-wait-timeout=60s --exclude-schema=br*_before_*"
+  export BACKUP_SUFFIX=".dump"
+  run_backup
+  expect_rc 0 "Pharmakon discovery as svc_backup"
+  expect_out "⏭️ pharmacy_broken skipped: no CONNECT privilege"
+  expect_no_out "analytics"
+  expect_out "Auto-discovered 3 database(s): control pharmacy_alpha pharmacy_beta"
+  expect_out "3 succeeded, 0 failed, 1 skipped"
+  for db in control pharmacy_alpha pharmacy_beta; do
+    only_file "${BACKUP_DIR}/last" "${db}-[0-9]*.dump" >/dev/null
+  done
+  expect_count "${BACKUP_DIR}/last" 'pharmacy_broken-*' 0
+  # Every branch schema is in the dump; the restore set-aside copy is not.
+  list="$(mktemp)"
+  pg_restore --list "$(only_file "${BACKUP_DIR}/last" 'pharmacy_alpha-[0-9]*.dump')" > "${list}"
+  grep -q ' SCHEMA - br01 ' "${list}" || fail "br01 missing from pharmacy_alpha's dump"
+  grep -q ' SCHEMA - br02 ' "${list}" || fail "br02 missing from pharmacy_alpha's dump"
+  grep -q 'TABLE DATA public riayati_transaction ' "${list}" || fail "Riayati rows missing (row-level security)"
+  if grep -q 'br01_before_' "${list}"; then fail "the set-aside copy was dumped"; fi
+  pg_restore --list "$(only_file "${BACKUP_DIR}/last" 'pharmacy_beta-[0-9]*.dump')" > "${list}"
+  grep -q ' SCHEMA - br100 ' "${list}" || fail "the three-digit branch br100 is missing"
+  rm -f "${list}"
+  # POSTGRES_DB_EXCLUDE still applies on top of the include globs.
+  sleep 1
+  POSTGRES_DB_EXCLUDE="pharmacy_beta" run_backup
+  expect_rc 0 "include + exclude"
+  expect_out "Auto-discovered 2 database(s): control pharmacy_alpha"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then
