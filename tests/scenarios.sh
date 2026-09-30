@@ -33,6 +33,29 @@ scenario_pharmakon_fixture() {
   [ "${got}" = "3" ] || fail "beta branch schemas: ${got}"
 }
 
+scenario_lock_busy() {
+  fresh_backup_dir
+  mkdir -p "${BACKUP_DIR}/last"
+  # The "running" run's in-flight file: a locked-out run must not touch it.
+  touch "${BACKUP_DIR}/last/.database-20260101-000000.sql.gz.part"
+  exec 9>>"${BACKUP_DIR}/.lock"
+  flock -n 9 || fail "could not take the lock for the test"
+  run_backup
+  exec 9>&-
+  expect_rc 75 "second run while the lock is held"
+  expect_out "Another backup run holds ${BACKUP_DIR}/.lock. Not started."
+  [ -e "${BACKUP_DIR}/last/.database-20260101-000000.sql.gz.part" ] || fail "the locked-out run deleted the running run's .part"
+  expect_count "${BACKUP_DIR}/last" 'database-*' 0
+}
+
+scenario_failed_db_exits_1() {
+  fresh_backup_dir
+  POSTGRES_DB="database,no_such_db" run_backup
+  expect_rc 1 "one of two databases missing"
+  only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz' >/dev/null
+  expect_out "no_such_db"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

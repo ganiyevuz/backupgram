@@ -124,6 +124,12 @@ jobs:
       - name: "Scenario: Pharmakon fixture"
         run: bash tests/scenarios.sh pharmakon_fixture
 
+      - name: "Scenario: lock held → exit 75"
+        run: bash tests/scenarios.sh lock_busy
+
+      - name: "Scenario: failed database → exit 1"
+        run: bash tests/scenarios.sh failed_db_exits_1
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

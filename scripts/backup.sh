@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
-# Prevent overlapping backup runs
-LOCK_FILE="/tmp/backup.lock"
-exec 200>"${LOCK_FILE}"
-if ! flock --nonblock 200; then
-  echo "⚠️ Another backup is already running. Skipping this run." >&2
-  exit 0
-fi
+# The real directory of this script: /backup.sh and /usr/local/bin/backup are symlinks.
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
 # Define the error handling function
 HOOKS_DIR="/hooks"
@@ -18,7 +13,21 @@ if [ -d "${HOOKS_DIR}" ]; then
   trap 'on_error' ERR
 fi
 
-source "$(dirname "$0")/env.sh"
+source "${SCRIPT_DIR}/env.sh"
+
+# One run at a time, across every container that shares BACKUP_DIR. A second run
+# exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
+# running one's .part file.
+exec 200>>"${BACKUP_DIR}/.lock"
+if ! flock -n 200; then
+  echo "⏳ Another backup run holds ${BACKUP_DIR}/.lock. Not started." >&2
+  exit 75
+fi
+
+# One timestamp per run: every file this run writes carries the run's start time,
+# and the weekly/monthly decisions use the same instant.
+read -r STAMP RUN_DATE RUN_WEEK RUN_MONTH RUN_WEEKDAY RUN_DAY <<< "$(date '+%Y%m%d-%H%M%S %Y%m%d %G%V %Y%m %u %d')"
+BACKUP_START_TIME=$(date +%s)
 
 # Pre-backup hook
 if [ -d "${HOOKS_DIR}" ]; then
@@ -342,15 +351,14 @@ send_telegram_message() {
 BACKUP_SUCCESS=0
 BACKUP_FAILED=0
 FAILED_DBS=""
-BACKUP_START_TIME=$(date +%s)
 
 # Handle cluster mode: pg_dumpall dumps ALL databases at once
 if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
   DB="cluster"
-  LAST_FILENAME="${DB}-$(date +%Y%m%d-%H%M%S)${BACKUP_SUFFIX}"
-  DAILY_FILENAME="${DB}-$(date +%Y%m%d)${BACKUP_SUFFIX}"
-  WEEKLY_FILENAME="${DB}-$(date +%G%V)${BACKUP_SUFFIX}"
-  MONTHLY_FILENAME="${DB}-$(date +%Y%m)${BACKUP_SUFFIX}"
+  LAST_FILENAME="${DB}-${STAMP}${BACKUP_SUFFIX}"
+  DAILY_FILENAME="${DB}-${RUN_DATE}${BACKUP_SUFFIX}"
+  WEEKLY_FILENAME="${DB}-${RUN_WEEK}${BACKUP_SUFFIX}"
+  MONTHLY_FILENAME="${DB}-${RUN_MONTH}${BACKUP_SUFFIX}"
   FILE="${BACKUP_DIR}/last/${LAST_FILENAME}"
   DFILE="${BACKUP_DIR}/daily/${DAILY_FILENAME}"
   WFILE="${BACKUP_DIR}/weekly/${WEEKLY_FILENAME}"
@@ -373,10 +381,10 @@ for DB in ${POSTGRES_DBS}; do
   DB_START_TIME=$(date +%s)
 
   if [ "${POSTGRES_CLUSTER}" != "TRUE" ]; then
-    LAST_FILENAME="${DB}-$(date +%Y%m%d-%H%M%S)${BACKUP_SUFFIX}"
-    DAILY_FILENAME="${DB}-$(date +%Y%m%d)${BACKUP_SUFFIX}"
-    WEEKLY_FILENAME="${DB}-$(date +%G%V)${BACKUP_SUFFIX}"
-    MONTHLY_FILENAME="${DB}-$(date +%Y%m)${BACKUP_SUFFIX}"
+    LAST_FILENAME="${DB}-${STAMP}${BACKUP_SUFFIX}"
+    DAILY_FILENAME="${DB}-${RUN_DATE}${BACKUP_SUFFIX}"
+    WEEKLY_FILENAME="${DB}-${RUN_WEEK}${BACKUP_SUFFIX}"
+    MONTHLY_FILENAME="${DB}-${RUN_MONTH}${BACKUP_SUFFIX}"
     FILE="${BACKUP_DIR}/last/${LAST_FILENAME}"
     DFILE="${BACKUP_DIR}/daily/${DAILY_FILENAME}"
     WFILE="${BACKUP_DIR}/weekly/${WEEKLY_FILENAME}"
@@ -544,4 +552,9 @@ fi
 # Post-backup hook
 if [ -d "${HOOKS_DIR}" ]; then
   run-parts -a "post-backup" --reverse --exit-on-error "${HOOKS_DIR}"
+fi
+
+# 0: every database dumped. 1: at least one failed (the others still ran).
+if [ "${BACKUP_FAILED}" -gt 0 ]; then
+  exit 1
 fi

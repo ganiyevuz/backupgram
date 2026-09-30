@@ -106,13 +106,12 @@ else
 fi
 echo ""
 
-# Lock status
-LOCK_FILE="/tmp/backup.lock"
-if flock --nonblock 200 2>/dev/null; then
-  echo "Backup Lock:  idle (not running)"
-  exec 200>&-
-else
-  echo "Backup Lock:  🔒 backup in progress"
-fi 200>"${LOCK_FILE}"
+# Lock status: the backup run holds ${BACKUP_DIR}/.lock while it runs.
+LOCK_FILE="${BACKUP_DIR}/.lock"
+LOCK_STATE="idle (not running)"
+if [ -e "${LOCK_FILE}" ] && ! flock -n "${LOCK_FILE}" true 2>/dev/null; then
+  LOCK_STATE="🔒 backup in progress"
+fi
+echo "Backup Lock:  ${LOCK_STATE}"
 
 echo "════════════════════════════════════════"
