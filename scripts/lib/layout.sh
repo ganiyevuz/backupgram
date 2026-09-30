@@ -2,10 +2,19 @@
 # finished dump into daily/weekly/monthly, and retention. Uses BACKUP_DIR, the
 # run variables (STAMP, RUN_*) and the KEEP_* thresholds computed in env.sh.
 
-# Creates the folders and removes .part files a killed run left behind. Runs only
-# with the lock held, so no live run's .part can be removed.
+# Creates the folders (group BACKUP_GID, setgid 2750, files 0640 when set) and
+# removes .part files a killed run left behind. Runs only with the lock held, so
+# no live run's .part can be removed.
 prepare_backup_dir() {
-  mkdir -p "${BACKUP_DIR}/last" "${BACKUP_DIR}/daily" "${BACKUP_DIR}/weekly" "${BACKUP_DIR}/monthly"
+  local slots=("${BACKUP_DIR}/last" "${BACKUP_DIR}/daily" "${BACKUP_DIR}/weekly" "${BACKUP_DIR}/monthly")
+  if [ -n "${BACKUP_GID}" ]; then
+    umask 027
+  fi
+  mkdir -p "${slots[@]}"
+  if [ -n "${BACKUP_GID}" ]; then
+    chgrp "${BACKUP_GID}" "${BACKUP_DIR}" "${slots[@]}"
+    chmod 2750 "${BACKUP_DIR}" "${slots[@]}"
+  fi
   find "${BACKUP_DIR}/last" -maxdepth 1 -mindepth 1 -name '.*.part' -exec rm -rf '{}' +
 }
 
@@ -41,12 +50,60 @@ update_latest() {
   fi
 }
 
+# Prints the database of a stamped name <db>-YYYYMMDD-HHMMSS<suffix>; fails for any
+# other name. The stamp is always the last 15 characters before the suffix, so a
+# database name may itself contain hyphens and digits (keep-20260101).
+stamped_db_name() {
+  local name="$1" suffix="$2" base
+  [[ "${name}" == *"${suffix}" ]] || return 1
+  base="${name%"${suffix}"}"
+  [[ "${base}" =~ ^(.+)-[0-9]{8}-[0-9]{6}$ ]] || return 1
+  printf '%s' "${BASH_REMATCH[1]}"
+}
+
+# Removes DB's older dumps from last/, now that KEEP is in place.
+prune_last_for_db() {
+  local db="$1" keep="$2" suffix="$3" f n
+  for f in "${BACKUP_DIR}/last/"*; do
+    [ -e "${f}" ] || continue
+    n="$(basename "${f}")"
+    [ "${n}" != "${keep}" ] || continue
+    if [ "$(stamped_db_name "${n}" "${suffix}")" = "${db}" ]; then
+      rm -rf "${f}" || return 1
+    fi
+  done
+}
+
+# snapshot layout: every folder holds the run's own timestamped file (a hard link;
+# a copy for directory dumps). daily/ gets every run, weekly/ Sunday's run, monthly/
+# the 1st's; last/ keeps only the newest dump of the database.
+link_snapshot() {
+  local db="$1" file="$2" name="$3" suffix="$4" slot slots=(daily)
+  if [ "${RUN_WEEKDAY}" = "7" ]; then
+    slots+=(weekly)
+  fi
+  if [ "${RUN_DAY}" = "01" ]; then
+    slots+=(monthly)
+  fi
+  update_latest last "${name}" "${db}" "${suffix}" || return 1
+  for slot in "${slots[@]}"; do
+    place_copy "${file}" "${BACKUP_DIR}/${slot}/${name}" || return 1
+    update_latest "${slot}" "${name}" "${db}" "${suffix}" || return 1
+  done
+  prune_last_for_db "${db}" "${name}" "${suffix}"
+}
+
 # Links the finished dump FILE (last/<db>-<STAMP><suffix>) into the other folders.
-# period layout: one file per day/week/month, replaced by every run of that period.
+# period layout (default): one file per day/week/month, replaced by every run of that
+# period; snapshot: see link_snapshot.
 link_into_slots() {
   local db="$1" file="$2" name suffix daily weekly monthly
   name="$(basename "${file}")"
   suffix="${name#"${db}-${STAMP}"}"
+  if [ "${BACKUP_LAYOUT}" = "snapshot" ]; then
+    link_snapshot "${db}" "${file}" "${name}" "${suffix}"
+    return
+  fi
   daily="${db}-${RUN_DATE}${suffix}"
   weekly="${db}-${RUN_WEEK}${suffix}"
   monthly="${db}-${RUN_MONTH}${suffix}"
@@ -75,5 +132,30 @@ apply_retention() {
   prune_slot daily -mtime "${KEEP_DAYS}" "${suffix}"
   prune_slot weekly -mtime "${KEEP_WEEKS}" "${suffix}"
   prune_slot monthly -mtime "${KEEP_MONTHS}" "${suffix}"
-  prune_slot last -mmin "${KEEP_MINS}" "${suffix}"
+  # snapshot: last/ is managed by prune_last_for_db / prune_dropped_databases instead.
+  if [ "${BACKUP_LAYOUT}" != "snapshot" ]; then
+    prune_slot last -mmin "${KEEP_MINS}" "${suffix}"
+  fi
+}
+
+# snapshot layout: last/ holds the newest dump of each database that still exists.
+# A dropped database's dump leaves last/; its daily/weekly/monthly links age out
+# normally. If the server cannot be listed, nothing is removed.
+prune_dropped_databases() {
+  local suffix="$1" existing f n db
+  [ "${BACKUP_LAYOUT}" = "snapshot" ] || return 0
+  [ "${POSTGRES_CLUSTER}" != "TRUE" ] || return 0
+  if ! existing=$(psql -X -d postgres -tAc "SELECT datname FROM pg_database") || [ -z "${existing}" ]; then
+    echo "⚠️ Could not list the server's databases; no dropped database's dump was removed." >&2
+    return 0
+  fi
+  for f in "${BACKUP_DIR}/last/"*; do
+    [ -e "${f}" ] || continue
+    n="$(basename "${f}")"
+    db="$(stamped_db_name "${n}" "${suffix}")" || continue
+    if ! grep -qxF -- "${db}" <<< "${existing}"; then
+      rm -rf "${f}"
+      echo "🗑️ ${db} no longer exists: its dump left last/ (daily/weekly/monthly keep theirs)"
+    fi
+  done
 }

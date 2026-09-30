@@ -191,10 +191,9 @@ else
 fi
 
 # Unsigned integer settings
-# shellcheck disable=SC2043  # a list on purpose: more integer settings join it
-for _uint_var in BACKUP_MIN_BYTES; do
+for _uint_var in BACKUP_MIN_BYTES BACKUP_GID; do
   if [ -n "${!_uint_var}" ] && ! [[ "${!_uint_var}" =~ ^[0-9]+$ ]]; then
-    echo "❌ ${_uint_var} must be a whole number of bytes (got '${!_uint_var}')." >&2
+    echo "❌ ${_uint_var} must be a whole number (got '${!_uint_var}')." >&2
     exit 1
   fi
 done
@@ -212,6 +211,15 @@ for _bool_var in BACKUP_RLS_GUARD; do
   esac
 done
 unset _bool_var
+
+BACKUP_LAYOUT="${BACKUP_LAYOUT:-period}"
+case "${BACKUP_LAYOUT}" in
+  period | snapshot) ;;
+  *)
+    echo "❌ BACKUP_LAYOUT must be period or snapshot (got '${BACKUP_LAYOUT}')." >&2
+    exit 1
+    ;;
+esac
 
 # Encryption (optional)
 if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then

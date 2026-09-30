@@ -323,6 +323,9 @@ for DB in "${DBS[@]}"; do
   fi
 done
 
+# Dropped databases leave last/ (snapshot layout; needs a successful server listing)
+prune_dropped_databases "$(final_suffix)"
+
 # Retention, once, over every file (see apply_retention) — skipped when nothing was
 # backed up, so a run failing for every database never erodes the last good copies.
 if [ "${BACKUP_SUCCESS}" -gt 0 ]; then

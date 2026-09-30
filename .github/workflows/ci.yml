@@ -157,6 +157,15 @@ jobs:
       - name: "Scenario: Pharmakon row-level-security guard"
         run: bash tests/scenarios.sh pharmakon_rls_guard
 
+      - name: "Scenario: snapshot layout calendar (faketime)"
+        run: bash tests/scenarios.sh snapshot_calendar
+
+      - name: "Scenario: dropped database leaves last/"
+        run: bash tests/scenarios.sh dropped_database
+
+      - name: "Scenario: BACKUP_GID permissions"
+        run: bash tests/scenarios.sh gid_permissions
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

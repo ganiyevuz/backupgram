@@ -247,6 +247,71 @@ scenario_pharmakon_rls_guard() {
   [ -e "${beta}" ] || fail "pharmacy_beta's first dump disappeared"
 }
 
+scenario_snapshot_calendar() {
+  fresh_backup_dir
+  local last name slot
+  export BACKUP_LAYOUT="snapshot" BACKUP_LATEST_TYPE="none"
+  # faketime moves find's clock too: keep retention out of the way.
+  export BACKUP_KEEP_DAYS=100000 BACKUP_KEEP_WEEKS=10000 BACKUP_KEEP_MONTHS=3000
+  run_backup_at "2026-11-01 04:00:00"
+  expect_rc 0 "snapshot run on Sunday the 1st"
+  last="$(only_file "${BACKUP_DIR}/last" 'database-20261101-0400[0-9][0-9].sql.gz')"
+  name="$(basename "${last}")"
+  for slot in daily weekly monthly; do
+    [ "$(inode "${BACKUP_DIR}/${slot}/${name}")" = "$(inode "${last}")" ] || fail "${slot}/${name} is not a hard link of last/"
+  done
+  run_backup_at "2026-11-03 04:00:00"
+  expect_rc 0 "snapshot run on a Tuesday"
+  only_file "${BACKUP_DIR}/last" 'database-20261103-0400[0-9][0-9].sql.gz' >/dev/null
+  expect_count "${BACKUP_DIR}/daily" 'database-[0-9]*.sql.gz' 2
+  expect_count "${BACKUP_DIR}/weekly" 'database-[0-9]*.sql.gz' 1
+  expect_count "${BACKUP_DIR}/monthly" 'database-[0-9]*.sql.gz' 1
+  expect_count "${BACKUP_DIR}/last" '*-latest*' 0
+}
+
+scenario_dropped_database() {
+  fresh_backup_dir
+  local dropme_daily
+  psql_su -d postgres -c 'DROP DATABASE IF EXISTS dropme WITH (FORCE)' \
+    -c 'DROP DATABASE IF EXISTS "keep-20260101" WITH (FORCE)' \
+    -c 'CREATE DATABASE dropme' -c 'CREATE DATABASE "keep-20260101"'
+  export BACKUP_LAYOUT="snapshot" BACKUP_LATEST_TYPE="none"
+  POSTGRES_DB="database,dropme,keep-20260101" run_backup
+  expect_rc 0 "three databases"
+  dropme_daily="$(only_file "${BACKUP_DIR}/daily" 'dropme-*.sql.gz')"
+  psql_su -d postgres -c 'DROP DATABASE dropme WITH (FORCE)'
+  sleep 1
+  POSTGRES_DB="database,keep-20260101" run_backup
+  expect_rc 0 "after the drop"
+  expect_out "🗑️ dropme no longer exists: its dump left last/ (daily/weekly/monthly keep theirs)"
+  expect_count "${BACKUP_DIR}/last" 'dropme-*' 0
+  [ -e "${dropme_daily}" ] || fail "the dropped database's daily copy was removed"
+  # A database whose own name looks like a stamp keeps exactly its newest dump.
+  only_file "${BACKUP_DIR}/last" 'keep-20260101-[0-9]*.sql.gz' >/dev/null
+  expect_no_out "keep-20260101 no longer exists"
+  expect_no_out "🗑️ keep "
+  psql_su -d postgres -c 'DROP DATABASE "keep-20260101" WITH (FORCE)'
+}
+
+scenario_gid_permissions() {
+  fresh_backup_dir
+  local gid f
+  gid="$(id -G | tr ' ' '\n' | tail -1)"   # a group this user may chgrp to
+  if [ "$(id -u)" = "0" ]; then
+    gid=1000
+  fi
+  BACKUP_GID="${gid}" run_backup
+  expect_rc 0 "BACKUP_GID=${gid}"
+  for f in "${BACKUP_DIR}" "${BACKUP_DIR}/last" "${BACKUP_DIR}/daily" "${BACKUP_DIR}/weekly" "${BACKUP_DIR}/monthly"; do
+    [ "$(stat -c '%a %g' "${f}")" = "2750 ${gid}" ] || fail "${f}: $(stat -c '%a %g' "${f}"), expected 2750 ${gid}"
+  done
+  f="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz')"
+  [ "$(stat -c '%a %g' "${f}")" = "640 ${gid}" ] || fail "${f}: $(stat -c '%a %g' "${f}"), expected 640 ${gid}"
+  BACKUP_GID="staff" run_backup
+  expect_rc 1 "a non-numeric BACKUP_GID is refused"
+  expect_out "BACKUP_GID must be a whole number"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then
