@@ -252,6 +252,13 @@ All webhook calls send a JSON payload with `status`, `hostname`, `timestamp`,
 | `BACKUP_MIN_DISK_SPACE` | `100` | Minimum free disk space (MB) required before starting a backup |
 | `TZ` | `""` | POSIX timezone (e.g. `Europe/Berlin`) for schedule evaluation |
 
+The image's `HEALTHCHECK` (`/scripts/healthcheck.sh`) reports the container
+unhealthy when `go-cron` does not answer (`go-cron is not responding`), when the
+last scheduled run exited non-zero (`last backup run exited <N>`), when the last
+backup failed, or when it is older than `BACKUP_MAX_AGE_HOURS`. A scheduled run
+that exits `75` because another run held the lock (a manual `backup` or a REST API
+run) does not count as a failure.
+
 ---
 
 ## REST API and metrics

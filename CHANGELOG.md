@@ -12,6 +12,10 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - `backup` exits **75** when another run holds the lock, and **1** when any database
   failed (the others still run). Both used to exit 0. REST API backup jobs now report
   these runs as failed.
+- The container healthcheck reads the last scheduled run's exit status from
+  `go-cron`: a run that exited `75` (locked out by a manual or REST API run) counts as
+  healthy; any other non-zero exit reports `UNHEALTHY: last backup run exited <N>`
+  (it used to read every failed run as `go-cron is not responding`).
 - The lock moved from `/tmp/backup.lock` to `${BACKUP_DIR}/.lock`, so containers sharing
   a backup volume also run one at a time.
 - Every file of a run carries the run's start time (it was each database's dump time).
