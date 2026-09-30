@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Backup folder layout, sourced by backup.sh: preparing the folders, linking a
 # finished dump into daily/weekly/monthly, and retention. Uses BACKUP_DIR, the
 # run variables (STAMP, RUN_*) and the KEEP_* thresholds computed in env.sh.

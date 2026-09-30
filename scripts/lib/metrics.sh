@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Prometheus metrics, sourced by backup.sh. Rendered after each run from the files
 # on disk (so they survive restarts, and stop advancing when the container is dead)
 # plus this run's results, then written for node-exporter's textfile collector

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Auto-discovery, sourced by backup.sh: which databases this run backs up.
 
 # True when NAME matches one of the POSTGRES_DB_INCLUDE globs, or the list is empty.

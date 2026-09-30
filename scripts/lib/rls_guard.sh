@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Row-level-security guard (BACKUP_RLS_GUARD=TRUE), sourced by backup.sh. With
 # pg_dump --enable-row-security, the policies decide what the login reads: a table
 # no policy opens in full to it is dumped short, or empty, with no error at all.

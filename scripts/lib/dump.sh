@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Dumping, sourced by backup.sh: format detection, the passphrase file, the
 # streaming dump into a .part file, and its verification. Nothing unencrypted is
 # written when encryption is on, and the key never appears on a command line.

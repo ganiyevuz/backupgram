@@ -183,6 +183,11 @@ scenario_formats_still_work() {
     expect_rc 0 "format '${opts}' (encrypted when not a directory)"
     expect_count "${BACKUP_DIR}/daily" 'database-[0-9]*' 1
   done
+  # The image default, clear text: -Z1 without a key is verified with gunzip -c on the .part.
+  fresh_backup_dir
+  POSTGRES_EXTRA_OPTS="-Z1" BACKUP_ENCRYPTION_KEY="" run_backup
+  expect_rc 0 "format '-Z1' in clear text"
+  only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz' >/dev/null
   fresh_backup_dir
   POSTGRES_CLUSTER="TRUE" POSTGRES_EXTRA_OPTS="" BACKUP_ENCRYPTION_KEY="k" run_backup
   expect_rc 0 "encrypted cluster dump"

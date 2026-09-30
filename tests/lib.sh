@@ -1,8 +1,10 @@
+# shellcheck shell=bash
 # Helpers for tests/scenarios.sh. Sourced, never executed.
 # Environment: the CI job's POSTGRES_* / BACKUP_* variables, with a superuser login.
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_SH="${REPO_DIR}/scripts/backup.sh"
+# shellcheck disable=SC2034  # used by tests/scenarios.sh
 RESTORE_SH="${REPO_DIR}/scripts/restore.sh"
 
 # The superuser, kept aside before a scenario switches POSTGRES_USER to a service login.
