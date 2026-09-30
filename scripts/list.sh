@@ -23,7 +23,8 @@ fi
 
 # Cleanup preview mode
 if [ "${CLEANUP_PREVIEW}" = true ]; then
-  source "$(dirname "$0")/env.sh" 2>/dev/null || true
+  # The real directory of this script: /list.sh and /usr/local/bin/list are symlinks.
+  source "$(dirname "$(readlink -f "$0")")/env.sh" 2>/dev/null || true
 
   echo "════════════════════════════════════════"
   echo "  Cleanup Preview (dry run)"

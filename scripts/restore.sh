@@ -8,7 +8,9 @@ set -Eeo pipefail
 #   restore.sh /backups/last/mydb-20260416-143000.sql.gz mydb_restored
 #   restore.sh /backups/daily/mydb-latest.sql.gz
 
-source "$(dirname "$0")/env.sh"
+# The real directory of this script: /restore.sh and /usr/local/bin/restore are symlinks.
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "${SCRIPT_DIR}/env.sh"
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 
