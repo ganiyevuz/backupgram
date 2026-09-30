@@ -139,10 +139,11 @@ apply_retention() {
 }
 
 # snapshot layout: last/ holds the newest dump of each database that still exists.
-# A dropped database's dump leaves last/; its daily/weekly/monthly links age out
-# normally. If the server cannot be listed, nothing is removed.
+# A dropped database's dump and its -latest entry (link or copy) leave last/; its
+# daily/weekly/monthly links age out normally. If the server cannot be listed,
+# nothing is removed.
 prune_dropped_databases() {
-  local suffix="$1" existing f n db
+  local suffix="$1" existing f n db dropped=""
   [ "${BACKUP_LAYOUT}" = "snapshot" ] || return 0
   [ "${POSTGRES_CLUSTER}" != "TRUE" ] || return 0
   if ! existing=$(psql -X -d postgres -tAc "SELECT datname FROM pg_database") || [ -z "${existing}" ]; then
@@ -155,7 +156,12 @@ prune_dropped_databases() {
     db="$(stamped_db_name "${n}" "${suffix}")" || continue
     if ! grep -qxF -- "${db}" <<< "${existing}"; then
       rm -rf "${f}"
-      echo "🗑️ ${db} no longer exists: its dump left last/ (daily/weekly/monthly keep theirs)"
+      # Once per database, however many of its dumps last/ still held.
+      if ! grep -qxF -- "${db}" <<< "${dropped}"; then
+        dropped+="${db}"$'\n'
+        rm -rf "${BACKUP_DIR}/last/${db}-latest${suffix}"
+        echo "🗑️ ${db} no longer exists: its dump left last/ (daily/weekly/monthly keep theirs)"
+      fi
     fi
   done
 }

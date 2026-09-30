@@ -275,19 +275,22 @@ scenario_dropped_database() {
   psql_su -d postgres -c 'DROP DATABASE IF EXISTS dropme WITH (FORCE)' \
     -c 'DROP DATABASE IF EXISTS "keep-20260101" WITH (FORCE)' \
     -c 'CREATE DATABASE dropme' -c 'CREATE DATABASE "keep-20260101"'
-  export BACKUP_LAYOUT="snapshot" BACKUP_LATEST_TYPE="none"
+  export BACKUP_LAYOUT="snapshot" BACKUP_LATEST_TYPE="symlink"
   POSTGRES_DB="database,dropme,keep-20260101" run_backup
   expect_rc 0 "three databases"
-  dropme_daily="$(only_file "${BACKUP_DIR}/daily" 'dropme-*.sql.gz')"
+  dropme_daily="$(only_file "${BACKUP_DIR}/daily" 'dropme-[0-9]*.sql.gz')"
   psql_su -d postgres -c 'DROP DATABASE dropme WITH (FORCE)'
   sleep 1
   POSTGRES_DB="database,keep-20260101" run_backup
   expect_rc 0 "after the drop"
   expect_out "🗑️ dropme no longer exists: its dump left last/ (daily/weekly/monthly keep theirs)"
+  # Neither the stamped dump nor the dropme-latest link stays in last/.
   expect_count "${BACKUP_DIR}/last" 'dropme-*' 0
   [ -e "${dropme_daily}" ] || fail "the dropped database's daily copy was removed"
   # A database whose own name looks like a stamp keeps exactly its newest dump.
   only_file "${BACKUP_DIR}/last" 'keep-20260101-[0-9]*.sql.gz' >/dev/null
+  [ -L "${BACKUP_DIR}/last/keep-20260101-latest.sql.gz" ] || fail "keep-20260101's -latest link was removed"
+  [ -e "${BACKUP_DIR}/last/keep-20260101-latest.sql.gz" ] || fail "keep-20260101's -latest link dangles"
   expect_no_out "keep-20260101 no longer exists"
   expect_no_out "🗑️ keep "
   psql_su -d postgres -c 'DROP DATABASE "keep-20260101" WITH (FORCE)'
