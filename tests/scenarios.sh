@@ -56,6 +56,28 @@ scenario_failed_db_exits_1() {
   expect_out "no_such_db"
 }
 
+scenario_period_layout_retention() {
+  fresh_backup_dir
+  mkdir -p "${BACKUP_DIR}/daily" "${BACKUP_DIR}/weekly"
+  # A dropped database's old copies, its -latest link and a dot file: only the copies may go.
+  touch -d '30 days ago' "${BACKUP_DIR}/daily/gone-20200101.sql.gz" "${BACKUP_DIR}/daily/.keep.sql.gz"
+  ln -s gone-20200101.sql.gz "${BACKUP_DIR}/daily/gone-latest.sql.gz"
+  touch -d '400 days ago' "${BACKUP_DIR}/weekly/gone-202001.sql.gz"
+  BACKUP_LATEST_TYPE="hardlink" run_backup
+  expect_rc 0 "period layout"
+  local last day
+  last="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz')"
+  day="$(basename "${last}" | sed -E 's/^database-([0-9]{8})-.*/\1/')"
+  [ "$(inode "${BACKUP_DIR}/daily/database-${day}.sql.gz")" = "$(inode "${last}")" ] || fail "daily copy is not a hard link of last/"
+  [ "$(inode "${BACKUP_DIR}/weekly/database-$(date -d "${day}" +%G%V).sql.gz")" = "$(inode "${last}")" ] || fail "weekly copy"
+  [ "$(inode "${BACKUP_DIR}/monthly/database-${day:0:6}.sql.gz")" = "$(inode "${last}")" ] || fail "monthly copy"
+  [ "$(inode "${BACKUP_DIR}/last/database-latest.sql.gz")" = "$(inode "${last}")" ] || fail "hardlink -latest does not point at the new dump"
+  [ ! -e "${BACKUP_DIR}/daily/gone-20200101.sql.gz" ] || fail "a dropped database's old daily copy was not pruned"
+  [ ! -e "${BACKUP_DIR}/weekly/gone-202001.sql.gz" ] || fail "a dropped database's old weekly copy was not pruned"
+  [ -e "${BACKUP_DIR}/daily/.keep.sql.gz" ] || fail "retention deleted a dot file"
+  [ -L "${BACKUP_DIR}/daily/gone-latest.sql.gz" ] || fail "retention deleted a -latest link"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

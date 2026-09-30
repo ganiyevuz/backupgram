@@ -14,6 +14,8 @@ if [ -d "${HOOKS_DIR}" ]; then
 fi
 
 source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=scripts/lib/layout.sh
+source "${SCRIPT_DIR}/lib/layout.sh"
 
 # One run at a time, across every container that shares BACKUP_DIR. A second run
 # exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
@@ -28,6 +30,8 @@ fi
 # and the weekly/monthly decisions use the same instant.
 read -r STAMP RUN_DATE RUN_WEEK RUN_MONTH RUN_WEEKDAY RUN_DAY <<< "$(date '+%Y%m%d-%H%M%S %Y%m%d %G%V %Y%m %u %d')"
 BACKUP_START_TIME=$(date +%s)
+
+prepare_backup_dir
 
 # Pre-backup hook
 if [ -d "${HOOKS_DIR}" ]; then
@@ -99,9 +103,6 @@ fi
 
 # Telegram notification control (default: all)
 TELEGRAM_NOTIFY_ON="${TELEGRAM_NOTIFY_ON:-all}"
-
-# Initialize directories
-mkdir -p "${BACKUP_DIR}/last/" "${BACKUP_DIR}/daily/" "${BACKUP_DIR}/weekly/" "${BACKUP_DIR}/monthly/"
 
 # Telegram file size limit (50MB in bytes) and the bot MTProto ceiling (2GB)
 TELEGRAM_MAX_SIZE=52428800
@@ -438,48 +439,15 @@ for DB in ${POSTGRES_DBS}; do
     DB_DURATION=$(( $(date +%s) - DB_START_TIME ))
     BACKUP_SIZE=$(get_size "${FILE}")
     echo "✅ Backup created: ${FILE} (${BACKUP_SIZE}, ${DB_DURATION}s)"
+
+    # Link into daily/weekly/monthly (and -latest) per the layout
+    if ! link_into_slots "${DB}" "${FILE}"; then
+      echo "❌ ${DB}: could not link the dump into daily/weekly/monthly." >&2
+      BACKUP_FAILED=$((BACKUP_FAILED + 1))
+      FAILED_DBS="${FAILED_DBS} ${DB}"
+      continue
+    fi
     BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
-
-    # Rotate into daily/weekly/monthly slots
-    if [ -d "${FILE}" ]; then
-      cp -r "${FILE}" "${DFILE}"
-      cp -r "${FILE}" "${WFILE}"
-      cp -r "${FILE}" "${MFILE}"
-    else
-      ln -f "${FILE}" "${DFILE}"
-      ln -f "${FILE}" "${WFILE}"
-      ln -f "${FILE}" "${MFILE}"
-    fi
-
-    # Update latest symlinks
-    if [ "${BACKUP_LATEST_TYPE}" = "symlink" ] || [ "${BACKUP_LATEST_TYPE}" = "hardlink" ]; then
-      LATEST_LN_ARG=""
-      LATEST_SUFFIX="${BACKUP_SUFFIX}"
-      if [ -n "${BACKUP_ENCRYPTION_KEY}" ] && [ ! -d "${FILE}" ]; then
-        LATEST_SUFFIX="${BACKUP_SUFFIX}.gpg"
-      fi
-      if [ "${BACKUP_LATEST_TYPE}" = "symlink" ]; then
-        LATEST_LN_ARG="-s"
-      fi
-      if [ -d "${FILE}" ]; then
-        for DIR_TYPE in last daily weekly monthly; do
-          rm -rf "${BACKUP_DIR}/${DIR_TYPE}/${DB}-latest${BACKUP_SUFFIX}"
-        done
-        cp -r "${FILE}" "${BACKUP_DIR}/last/${DB}-latest${BACKUP_SUFFIX}"
-        cp -r "${DFILE}" "${BACKUP_DIR}/daily/${DB}-latest${BACKUP_SUFFIX}"
-        cp -r "${WFILE}" "${BACKUP_DIR}/weekly/${DB}-latest${BACKUP_SUFFIX}"
-        cp -r "${MFILE}" "${BACKUP_DIR}/monthly/${DB}-latest${BACKUP_SUFFIX}"
-      else
-        # shellcheck disable=SC2086
-        ln ${LATEST_LN_ARG} -f "${LAST_FILENAME}" "${BACKUP_DIR}/last/${DB}-latest${LATEST_SUFFIX}"
-        # shellcheck disable=SC2086
-        ln ${LATEST_LN_ARG} -f "${DAILY_FILENAME}" "${BACKUP_DIR}/daily/${DB}-latest${LATEST_SUFFIX}"
-        # shellcheck disable=SC2086
-        ln ${LATEST_LN_ARG} -f "${WEEKLY_FILENAME}" "${BACKUP_DIR}/weekly/${DB}-latest${LATEST_SUFFIX}"
-        # shellcheck disable=SC2086
-        ln ${LATEST_LN_ARG} -f "${MONTHLY_FILENAME}" "${BACKUP_DIR}/monthly/${DB}-latest${LATEST_SUFFIX}"
-      fi
-    fi
 
     # Send backup to Telegram (respects TELEGRAM_NOTIFY_ON)
     if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
@@ -487,30 +455,19 @@ for DB in ${POSTGRES_DBS}; do
         send_to_telegram "${FILE}" "${DB}"
       fi
     fi
-
-    # Clean old files (exclude -latest symlinks)
-    CLEANUP_SUFFIX="${BACKUP_SUFFIX}"
-    if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
-      CLEANUP_SUFFIX="${BACKUP_SUFFIX}.gpg"
-    fi
-    if [ -n "${KEEP_MINS}" ]; then
-      find "${BACKUP_DIR}/last" -maxdepth 1 -mmin "+${KEEP_MINS}" -name "${DB}-*${CLEANUP_SUFFIX}" ! -name "${DB}-latest${CLEANUP_SUFFIX}" -exec rm -rf '{}' +
-    fi
-    if [ -n "${KEEP_DAYS}" ]; then
-      find "${BACKUP_DIR}/daily" -maxdepth 1 -mtime "+${KEEP_DAYS}" -name "${DB}-*${CLEANUP_SUFFIX}" ! -name "${DB}-latest${CLEANUP_SUFFIX}" -exec rm -rf '{}' +
-    fi
-    if [ -n "${KEEP_WEEKS}" ]; then
-      find "${BACKUP_DIR}/weekly" -maxdepth 1 -mtime "+${KEEP_WEEKS}" -name "${DB}-*${CLEANUP_SUFFIX}" ! -name "${DB}-latest${CLEANUP_SUFFIX}" -exec rm -rf '{}' +
-    fi
-    if [ -n "${KEEP_MONTHS}" ]; then
-      find "${BACKUP_DIR}/monthly" -maxdepth 1 -mtime "+${KEEP_MONTHS}" -name "${DB}-*${CLEANUP_SUFFIX}" ! -name "${DB}-latest${CLEANUP_SUFFIX}" -exec rm -rf '{}' +
-    fi
   else
     echo "❌ Error: Backup file ${FILE} is empty or missing. Skipping." >&2
     BACKUP_FAILED=$((BACKUP_FAILED + 1))
     FAILED_DBS="${FAILED_DBS} ${DB}"
   fi
 done
+
+# Retention, once, over every file (see apply_retention)
+CLEANUP_SUFFIX="${BACKUP_SUFFIX}"
+if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
+  CLEANUP_SUFFIX="${BACKUP_SUFFIX}.gpg"
+fi
+apply_retention "${CLEANUP_SUFFIX}"
 
 # Backup summary
 BACKUP_END_TIME=$(date +%s)

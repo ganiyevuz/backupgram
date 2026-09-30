@@ -130,6 +130,9 @@ jobs:
       - name: "Scenario: failed database → exit 1"
         run: bash tests/scenarios.sh failed_db_exits_1
 
+      - name: "Scenario: period layout + retention over every file"
+        run: bash tests/scenarios.sh period_layout_retention
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
