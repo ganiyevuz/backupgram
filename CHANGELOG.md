@@ -12,12 +12,22 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - `backup` exits **75** when another run holds the lock, and **1** when any database
   failed (the others still run). Both used to exit 0. REST API backup jobs now report
   these runs as failed.
+- Failure lines (each failed database's `❌ …` line and the `❌ Failed: <dbs>` summary)
+  go to stderr, so `backup > log` no longer captures them: use `2>&1`.
+- Retention covers every file in each folder, not only the databases in the run: a
+  dropped or renamed database's copies now age out (they used to stay forever). The
+  databases that failed in the run keep all their copies, and retention is skipped
+  when no database was backed up, so neither a total outage nor a database failing
+  night after night erodes its last good copies.
 - The container healthcheck reads the last scheduled run's exit status from
   `go-cron`: a run that exited `75` (locked out by a manual or REST API run) counts as
   healthy; any other non-zero exit reports `UNHEALTHY: last backup run exited <N>`
   (it used to read every failed run as `go-cron is not responding`).
-- The lock moved from `/tmp/backup.lock` to `${BACKUP_DIR}/.lock`, so containers sharing
-  a backup volume also run one at a time.
+- The lock moved from `/tmp/backup.lock` to `${BACKUP_DIR}/.lock`, so the scheduled run
+  and a manual `docker exec … backup` (or two containers running the same
+  configuration on one volume) run one at a time. Keep **one `BACKUP_DIR` per
+  server/configuration**: with different servers or retention settings in one folder,
+  every-file retention and dropped-database pruning would act on each other's files.
 - Every file of a run carries the run's start time (it was each database's dump time).
 - A `BACKUP_ENCRYPTION_KEY` containing a newline is refused at startup (`❌
   BACKUP_ENCRYPTION_KEY must be a single line …`): gpg reads only the first line of
@@ -31,9 +41,6 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   are verified in full (custom/tar/directory with `pg_restore`, gzip with `gunzip`,
   through the decryption pipe), and only then renamed into place. Leftover `.part`
   files are removed by the next run.
-- Retention covers every file in each folder, so a dropped database's copies age out.
-  It is skipped when no database was backed up in the run, so a total outage never
-  erodes the last good copies.
 - `restore` exits 1 with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
   damaged file).` when an encrypted dump cannot be decrypted, and restores nothing.
   The target name derived from the file name also strips a trailing `.dump`.
@@ -42,8 +49,8 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer
   expanded against files.
 - `list`, `status` and `GET /backups` ignore dot files (`.part`, `.lock`, metrics).
-- Failure lines (each failed database's `❌ …` line and the `❌ Failed: <dbs>` summary)
-  go to stderr, so `backup > log` no longer captures them: use `2>&1`.
+- `restore` and `list --cleanup-preview` run as the CLI commands (`docker exec … restore`)
+  found no `env.sh` next to their `/usr/local/bin` symlink: `restore` failed at once.
 
 ### Added
 - `POSTGRES_DB_INCLUDE` — glob patterns for auto-discovered databases (also changeable

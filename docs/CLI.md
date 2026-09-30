@@ -44,7 +44,11 @@ Backup completed in 12s: 1 succeeded, 0 failed, 0 skipped
   lists the failures (`❌ Failed: <dbs>`), and each failed database keeps its
   previous dump.
 - `75` — another run holds `${BACKUP_DIR}/.lock`; nothing was started or changed.
-  Containers sharing a backup volume share the lock.
+  The lock serialises runs of the **same configuration** — the scheduled run and a
+  manual `docker exec … backup`, or two containers running the same settings on one
+  volume. Use one `BACKUP_DIR` per server/configuration: with different servers or
+  retention settings in one folder, every-file retention and dropped-database pruning
+  would act on each other's files.
 
 Failure lines go to **stderr**: each per-database `❌ …` line and the
 `❌ Failed: <dbs>` summary line. `backup > backup.log` therefore misses them;

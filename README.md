@@ -186,10 +186,12 @@ Each cycle writes every database's dump to a `.part` file in `last/`, verifies i
 renames it into place, then hard-links it into `daily/`, `weekly/`, and `monthly/`
 (shared inode — no extra disk). A database that fails keeps its previous dump and
 the run exits `1`. Retention cleanup runs once per run after all databases, over
-every file of each slot, and is skipped when nothing was backed up.
+every file of each slot; it leaves the copies of a database that failed in the run
+alone, and is skipped when nothing was backed up.
 
 > The `/backups` volume must be a POSIX filesystem with hardlink and symlink
-> support. VFAT, exFAT, and SMB/CIFS are not supported.
+> support. VFAT, exFAT, and SMB/CIFS are not supported. Use one backup folder per
+> server/configuration: retention acts on every file in it.
 
 Details and diagrams: **[Architecture](docs/ARCHITECTURE.md)**.
 

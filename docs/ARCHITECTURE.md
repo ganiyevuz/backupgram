@@ -144,10 +144,16 @@ flowchart TD
 
 `backup.sh` starts with `set -Eeo pipefail` and traps `ERR` to fire the `error`
 hook. A failing database does not stop the run: the others still dump, and the
-run ends with exit code `1`. The lock is `${BACKUP_DIR}/.lock`, so containers
-sharing a backup volume also run one at a time; a busy run prints one line and
-exits `75` without changing anything. Every file of a run carries the run's start
-time.
+run ends with exit code `1`. The lock is `${BACKUP_DIR}/.lock`, so runs of the same
+configuration — the scheduled run and a manual `docker exec … backup`, or two
+containers with the same settings on one volume — run one at a time; a busy run
+prints one line and exits `75` without changing anything. Every file of a run
+carries the run's start time.
+
+> **One `BACKUP_DIR` per server/configuration.** Retention prunes every backup file
+> in each folder and, in `snapshot` layout, `last/` drops the dumps of databases the
+> server no longer lists. Two different servers, or two retention settings, sharing
+> one folder would therefore delete each other's files; the lock does not prevent it.
 
 > Commands whose failure `backup.sh` handles itself run inside `if` / `||`
 > conditions, where `set -e` does not apply, so each command in those pipelines is
