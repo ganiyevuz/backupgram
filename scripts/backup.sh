@@ -335,13 +335,23 @@ for DB in "${DBS[@]}"; do
   DB_SECONDS["${DB}"]=$(( $(date +%s) - DB_START_TIME ))
 done
 
-# Dropped databases leave last/ (snapshot layout; needs a successful server listing)
-prune_dropped_databases "$(final_suffix)"
+# Dropped databases leave last/ (snapshot layout; needs a successful server listing).
+# Like retention below, a failure here is logged and never fails a run whose dumps succeeded.
+prune_dropped_databases "$(final_suffix)" \
+  || echo "⚠️ Could not remove every dropped database's dump; see the errors above." >&2
 
 # Retention, once, over every file (see apply_retention) — skipped when nothing was
 # backed up, so a run failing for every database never erodes the last good copies.
+# The databases that failed in this run keep their copies too.
 if [ "${BACKUP_SUCCESS}" -gt 0 ]; then
-  apply_retention "$(final_suffix)"
+  RETENTION_KEEP=()
+  for DB in "${!DB_OK[@]}"; do
+    if [ "${DB_OK["${DB}"]}" = "0" ]; then
+      RETENTION_KEEP+=("${DB}")
+    fi
+  done
+  apply_retention "$(final_suffix)" "${RETENTION_KEEP[@]}" \
+    || echo "⚠️ Retention could not finish; see the errors above." >&2
 else
   echo "⚠️ No database was backed up this run; retention skipped." >&2
 fi

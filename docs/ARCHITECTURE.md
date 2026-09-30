@@ -204,7 +204,8 @@ covers every backup file of each folder, not just this run's databases; each fol
 is pruned independently using its own `BACKUP_KEEP_*` threshold (see
 [CONFIGURATION.md → Layouts](CONFIGURATION.md#layouts) and
 [Retention Math](CONFIGURATION.md#retention-math)). It is skipped when no database
-was backed up in the run.
+was backed up in the run, and it leaves alone the copies of every database that
+failed in the run (its last good dumps).
 
 > Directory-format dumps (`-Fd`) cannot be hard-linked, so they are `cp -r`'d and
 > `tar.gz`'d for Telegram. Because of hard links + symlinks, `BACKUP_DIR` **must**

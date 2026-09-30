@@ -187,6 +187,9 @@ jobs:
       - name: "Scenario: no error hook on a successful run"
         run: bash tests/scenarios.sh error_hook_not_fired_on_success
 
+      - name: "Scenario: retention keeps a failing database's copies"
+        run: bash tests/scenarios.sh retention_keeps_failing_database
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

@@ -135,7 +135,11 @@ than its threshold: `daily` by `BACKUP_KEEP_DAYS`, `weekly` by
 `BACKUP_KEEP_WEEKS*7+1` days, `monthly` by `BACKUP_KEEP_MONTHS*31+1` days, and
 `last` by `BACKUP_KEEP_MINS` (`period` layout only). Dot files, `*-latest`
 pointers and any other folder (such as a `manual/` folder you create) are never
-touched. See [Retention Math](#retention-math).
+touched. A database that **failed in this run** keeps every copy it has (names
+starting `<db>-<digit>`, in every folder): they are its last good dumps, so a
+database that fails night after night never loses them — they stay, and take up
+disk, until it backs up again. A database that is not in the run at all (dropped,
+or removed from `POSTGRES_DB`) ages out normally. See [Retention Math](#retention-math).
 
 ---
 
@@ -292,7 +296,8 @@ KEEP_MONTHS=$((BACKUP_KEEP_MONTHS * 31 + 1))  # e.g. 6 months -> 187 days
 `daily/` by `BACKUP_KEEP_DAYS`, and `weekly/`/`monthly/` by the computed day
 counts above. Retention runs once per run, after every database has been dumped,
 over every backup file of each folder, so a dropped or renamed database's copies
-age out too. It is skipped when no database was backed up in the run
+age out too; the copies of a database that failed in the run are left alone. It is
+skipped when no database was backed up in the run
 (`⚠️ No database was backed up this run; retention skipped.`), so a total outage
 never erodes the last good copies. Use `list --cleanup-preview` to see exactly
 what the current policy would delete.

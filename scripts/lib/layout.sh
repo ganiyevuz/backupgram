@@ -118,26 +118,40 @@ link_into_slots() {
   update_latest monthly "${monthly}" "${db}" "${suffix}" || return 1
 }
 
+# NAME with the find -name glob characters ([ ] * ? \) escaped, so it matches only itself.
+glob_escape() {
+  printf '%s' "$1" | sed 's/[][*?\\]/\\&/g'
+}
+
 # Deletes entries of one folder older than AGE (find TEST: -mtime days or -mmin
 # minutes) whose names end in SUFFIX. -latest links and dot files are never touched.
+# The remaining arguments are extra find tests (the failed databases' exclusions).
 prune_slot() {
   local slot="$1" test="$2" age="$3" suffix="$4"
+  shift 4
   [ -n "${age}" ] || return 0
-  find "${BACKUP_DIR}/${slot}" -maxdepth 1 -mindepth 1 ! -name '.*' ! -name '*-latest*' \
+  find "${BACKUP_DIR}/${slot}" -maxdepth 1 -mindepth 1 ! -name '.*' ! -name '*-latest*' "$@" \
     -name "*${suffix}" "${test}" "+${age}" -exec rm -rf '{}' +
 }
 
 # Retention over every backup file in each folder, not only this run's databases:
-# a dropped or renamed database's copies age out like the others.
+# a dropped or renamed database's copies age out like the others. The databases
+# given after SUFFIX failed in this run: their copies (<db>-<digit>…) are the last
+# good ones and are kept, in every folder. Non-zero when a folder could not be pruned.
 apply_retention() {
-  local suffix="$1"
-  prune_slot daily -mtime "${KEEP_DAYS}" "${suffix}"
-  prune_slot weekly -mtime "${KEEP_WEEKS}" "${suffix}"
-  prune_slot monthly -mtime "${KEEP_MONTHS}" "${suffix}"
+  local suffix="$1" db keep=() rc=0
+  shift
+  for db in "$@"; do
+    keep+=(! -name "$(glob_escape "${db}")-[0-9]*")
+  done
+  prune_slot daily -mtime "${KEEP_DAYS}" "${suffix}" "${keep[@]}" || rc=1
+  prune_slot weekly -mtime "${KEEP_WEEKS}" "${suffix}" "${keep[@]}" || rc=1
+  prune_slot monthly -mtime "${KEEP_MONTHS}" "${suffix}" "${keep[@]}" || rc=1
   # snapshot: last/ is managed by prune_last_for_db / prune_dropped_databases instead.
   if [ "${BACKUP_LAYOUT}" != "snapshot" ]; then
-    prune_slot last -mmin "${KEEP_MINS}" "${suffix}"
+    prune_slot last -mmin "${KEEP_MINS}" "${suffix}" "${keep[@]}" || rc=1
   fi
+  return "${rc}"
 }
 
 # snapshot layout: last/ holds the newest dump of each database that still exists.

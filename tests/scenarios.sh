@@ -163,6 +163,18 @@ scenario_retention_skipped_when_nothing_succeeded() {
   [ -e "${BACKUP_DIR}/daily/database-20200101.sql.gz" ] || fail "retention pruned while nothing was backed up"
 }
 
+# A database that fails in this run keeps its old copies (its last good ones); one
+# not in the run at all (dropped, unlisted) still ages out.
+scenario_retention_keeps_failing_database() {
+  fresh_backup_dir
+  mkdir -p "${BACKUP_DIR}/daily"
+  touch -d '30 days ago' "${BACKUP_DIR}/daily/nope-20200101.sql.gz" "${BACKUP_DIR}/daily/gone-20200101.sql.gz"
+  POSTGRES_DB="database,nope" run_backup
+  expect_rc 1 "nope does not exist"
+  [ -e "${BACKUP_DIR}/daily/nope-20200101.sql.gz" ] || fail "retention pruned the failing database's old copy"
+  [ ! -e "${BACKUP_DIR}/daily/gone-20200101.sql.gz" ] || fail "a database not in the run kept its old copy"
+}
+
 scenario_formats_still_work() {
   local opts
   for opts in "-Z0" "-Z1" "-Z0 -Fd" "-Fc" "-Ft"; do
