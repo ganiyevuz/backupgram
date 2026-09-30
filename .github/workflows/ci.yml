@@ -111,6 +111,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
 
+      - name: Install scenario test tools (faketime, promtool)
+        run: |
+          sudo apt-get install -y faketime
+          curl -fsSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
+          promtool --version
+
+      - name: "Scenario: baseline"
+        run: bash tests/scenarios.sh baseline
+
+      - name: "Scenario: Pharmakon fixture"
+        run: bash tests/scenarios.sh pharmakon_fixture
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
