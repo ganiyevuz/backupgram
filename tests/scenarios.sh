@@ -338,9 +338,15 @@ scenario_metrics_textfile() {
   expect_rc 1 "one database missing"
   grep -qx 'backupgram_backup_success{project="CI Test",database="no_such_db"} 0' "${file}" || fail "failed series"
   grep -qx 'backupgram_run_success{project="CI Test"} 0' "${file}" || fail "run_success after a failure"
+  # The previous run left a failed-run file: remove it, so only the aborted run can have written this one.
+  rm -f "${file}"
   POSTGRES_HOST="127.0.0.1" POSTGRES_PORT="1" POSTGRES_CONNECT_TIMEOUT=1 METRICS_TEXTFILE_DIR="${dir}" run_backup
   expect_rc 1 "unreachable server"
-  grep -qx 'backupgram_run_success{project="CI Test"} 0' "${file}" || fail "an aborted run did not write metrics"
+  [ -f "${file}" ] || fail "an aborted run did not write the textfile"
+  grep -qx 'backupgram_run_success{project="CI Test"} 0' "${file}" || fail "an aborted run: run_success"
+  grep -qx 'backupgram_run_databases{project="CI Test",result="failed"} 0' "${file}" || fail "an aborted run: no database was attempted"
+  [ "$(grep -c '^backupgram_backup_success{' "${file}" || true)" = "0" ] || fail "an aborted run: per-database success series"
+  promtool check metrics < "${file}" || fail "promtool rejects the aborted run's metrics"
   rm -rf "${dir}"
 }
 
