@@ -357,6 +357,85 @@ scenario_monitoring_assets() {
     || fail "a dashboard query does not use a backupgram_ metric"
 }
 
+scenario_restore_encrypted_custom() {
+  fresh_backup_dir
+  local file
+  psql_su -d database -c "DROP TABLE IF EXISTS restore_probe" -c "CREATE TABLE restore_probe (id int)" \
+    -c "INSERT INTO restore_probe SELECT generate_series(1, 42)"
+  psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_probe WITH (FORCE)"
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" run_backup
+  expect_rc 0 "encrypted custom backup"
+  file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.dump.gpg')"
+  set +e
+  RUN_OUT="$(BACKUP_ENCRYPTION_KEY="wrong" bash "${RESTORE_SH}" "${file}" restored_probe < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 1 "restore with the wrong key"
+  expect_out "Could not read the backup"
+  set +e
+  RUN_OUT="$(BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" bash "${RESTORE_SH}" "${file}" restored_probe < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 0 "restore with the right key"
+  [ "$(psql_su -d restored_probe -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "restored rows"
+  # No target given: the database name comes from the file name (".dump.gpg" stripped).
+  set +e
+  RUN_OUT="$(BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" bash "${RESTORE_SH}" "${file}" < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 0 "restore into the database named by the file"
+  expect_out "Target: database@"
+  [ -z "$(find /tmp -maxdepth 1 -name 'database-*.dump' -print -quit)" ] || fail "a decrypted copy was written to /tmp"
+  psql_su -d postgres -c "DROP DATABASE restored_probe WITH (FORCE)"
+}
+
+# Pharmakon's backup-runner restores one branch: gpg --decrypt | pg_restore -n br<nn>.
+scenario_pharmakon_branch_restore() {
+  load_pharmakon_fixture
+  fresh_backup_dir
+  pharmakon_env
+  local file keyfile got
+  run_backup
+  expect_rc 0 "Pharmakon backup"
+  file="$(only_file "${BACKUP_DIR}/last" 'pharmacy_alpha-[0-9]*.dump.gpg')"
+  keyfile="$(mktemp)"
+  printf '%s' "${BACKUP_ENCRYPTION_KEY}" > "${keyfile}"
+  # backup-runner's _verify: a dbname line and br01's data in the listing.
+  # pg_restore --list stops after the table of contents: drain the rest so gpg is not killed by SIGPIPE.
+  got="$(gpg --batch --quiet --no-symkey-cache --decrypt --passphrase-file "${keyfile}" < "${file}" | { pg_restore --list; cat >/dev/null; })"
+  grep -qE '^; +dbname: pharmacy_alpha$' <<< "${got}" || fail "no dbname line in the listing"
+  grep -q ' TABLE DATA br01 ' <<< "${got}" || fail "no br01 data in the listing"
+  # _set_aside, then _restore_schema: br01 moved aside and restored alone from the dump.
+  psql_su -d pharmacy_alpha -c "SET ROLE svc_control_api" \
+    -c "ALTER SCHEMA br01 RENAME TO br01_before_20261001120000" -c "CREATE SCHEMA br01"
+  gpg --batch --quiet --no-symkey-cache --decrypt --passphrase-file "${keyfile}" < "${file}" \
+    | PGPASSWORD="${SVC_PASSWORD}" pg_restore -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT:-5432}" -U svc_control_api \
+        -d pharmacy_alpha -n br01 --no-owner --no-privileges --single-transaction --exit-on-error \
+    || fail "restoring br01 alone failed"
+  got="$(psql_su -d pharmacy_alpha -tAc "SELECT (SELECT count(*) FROM br01.otdel) || ' ' || (SELECT count(*) FROM br01_before_20261001120000.otdel)")"
+  [ "${got}" = "50 50" ] || fail "br01 rows after the branch restore: ${got}"
+  rm -f "${keyfile}"
+}
+
+scenario_list_status_hide_dot_files() {
+  fresh_backup_dir
+  local out
+  run_backup
+  expect_rc 0 "backup for the listing"
+  touch "${BACKUP_DIR}/last/.database-20200101-000000.sql.gz.part"
+  out="$(bash "${REPO_DIR}/scripts/list.sh")"
+  if grep -q '\.part' <<< "${out}"; then fail "list shows a .part file"; fi
+  grep -q 'database-' <<< "${out}" || fail "list lost the real backup"
+  out="$(bash "${REPO_DIR}/scripts/status.sh")"
+  grep -q 'Backup Lock:  idle' <<< "${out}" || fail "status: the lock should be idle"
+  grep -qE 'last: +2 files' <<< "${out}" || fail "status: last/ should count the dump and its -latest link, not the .part"
+  exec 9>>"${BACKUP_DIR}/.lock"
+  flock -n 9 || fail "could not take the lock for the test"
+  out="$(bash "${REPO_DIR}/scripts/status.sh")"
+  exec 9>&-
+  grep -q 'backup in progress' <<< "${out}" || fail "status does not see the held lock"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

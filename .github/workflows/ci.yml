@@ -172,6 +172,15 @@ jobs:
       - name: "Scenario: alert rules and dashboard"
         run: bash tests/scenarios.sh monitoring_assets
 
+      - name: "Scenario: streaming restore of an encrypted custom dump"
+        run: bash tests/scenarios.sh restore_encrypted_custom
+
+      - name: "Scenario: Pharmakon single-branch restore (backup-runner)"
+        run: bash tests/scenarios.sh pharmakon_branch_restore
+
+      - name: "Scenario: list/status hide dot files, see the lock"
+        run: bash tests/scenarios.sh list_status_hide_dot_files
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

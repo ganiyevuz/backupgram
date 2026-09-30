@@ -30,7 +30,11 @@ if [ "${CLEANUP_PREVIEW}" = true ]; then
   echo "════════════════════════════════════════"
   echo ""
   echo "Current retention policy:"
-  echo "  Last:    keep ${BACKUP_KEEP_MINS:-1440} minutes"
+  if [ "${BACKUP_LAYOUT:-period}" = "snapshot" ]; then
+    echo "  Last:    newest dump of each database (snapshot layout)"
+  else
+    echo "  Last:    keep ${BACKUP_KEEP_MINS:-1440} minutes"
+  fi
   echo "  Daily:   keep ${BACKUP_KEEP_DAYS:-7} days"
   echo "  Weekly:  keep $((${BACKUP_KEEP_WEEKS:-4} * 7 + 1)) days"
   echo "  Monthly: keep $((${BACKUP_KEEP_MONTHS:-6} * 31 + 1)) days"
@@ -50,14 +54,18 @@ if [ "${CLEANUP_PREVIEW}" = true ]; then
   fi
 
   # Check each slot
-  for SLOT_INFO in "last:mmin:${KEEP_MINS}" "daily:mtime:${KEEP_DAYS}" "weekly:mtime:${KEEP_WEEKS}" "monthly:mtime:${KEEP_MONTHS}"; do
+  SLOT_SPECS=("daily:mtime:${KEEP_DAYS}" "weekly:mtime:${KEEP_WEEKS}" "monthly:mtime:${KEEP_MONTHS}")
+  if [ "${BACKUP_LAYOUT:-period}" != "snapshot" ]; then
+    SLOT_SPECS=("last:mmin:${KEEP_MINS}" "${SLOT_SPECS[@]}")
+  fi
+  for SLOT_INFO in "${SLOT_SPECS[@]}"; do
     SLOT=$(echo "${SLOT_INFO}" | cut -d: -f1)
     TIME_FLAG=$(echo "${SLOT_INFO}" | cut -d: -f2)
     TIME_VAL=$(echo "${SLOT_INFO}" | cut -d: -f3)
     SLOT_DIR="${BACKUP_DIR}/${SLOT}"
     [ ! -d "${SLOT_DIR}" ] && continue
 
-    FILES=$(find "${SLOT_DIR}" -maxdepth 1 -"${TIME_FLAG}" "+${TIME_VAL}" -name "*${SUFFIX}" ! -name "*-latest${SUFFIX}" 2>/dev/null)
+    FILES=$(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 ! -name '.*' ! -name '*-latest*' -name "*${SUFFIX}" -"${TIME_FLAG}" "+${TIME_VAL}" 2>/dev/null)
     [ -z "${FILES}" ] && continue
 
     echo "Would delete from ${SLOT}/:"
@@ -88,7 +96,7 @@ for SLOT in last daily weekly monthly; do
   SLOT_DIR="${BACKUP_DIR}/${SLOT}"
   [ ! -d "${SLOT_DIR}" ] && continue
 
-  FILES=$(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 \( -type f -o -type l -o -type d \) 2>/dev/null | sort -r)
+  FILES=$(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 ! -name '.*' \( -type f -o -type l -o -type d \) 2>/dev/null | sort -r)
   [ -z "${FILES}" ] && continue
 
   if [ -n "${FILTER_DB}" ]; then

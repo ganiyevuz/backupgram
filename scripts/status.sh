@@ -27,6 +27,7 @@ else
 fi
 echo "  Schedule:   ${SCHEDULE:-@daily}"
 echo "  Cluster:    ${POSTGRES_CLUSTER:-FALSE}"
+echo "  Layout:     ${BACKUP_LAYOUT:-period}"
 echo "  Project:    ${PROJECT_NAME:-not set}"
 if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
   echo "  Encryption: enabled (AES-256)"
@@ -85,7 +86,7 @@ echo "Backup Inventory:"
 for SLOT in last daily weekly monthly; do
   SLOT_DIR="${BACKUP_DIR}/${SLOT}"
   if [ -d "${SLOT_DIR}" ]; then
-    COUNT=$(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l | tr -d ' ')
+    COUNT=$(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 ! -name '.*' 2>/dev/null | wc -l | tr -d ' ')
   else
     COUNT=0
   fi

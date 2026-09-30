@@ -12,6 +12,25 @@ source "$(dirname "$0")/env.sh"
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 
+# Temp files and the passphrase file, removed on exit.
+TEMP_FILES=""
+KEYFILE=""
+TG_TMPDIR=""
+cleanup() {
+  local tmp
+  for tmp in ${TEMP_FILES}; do
+    rm -rf "${tmp}"
+  done
+  if [ -n "${KEYFILE}" ]; then
+    rm -f "${KEYFILE}"
+  fi
+  if [ -n "${TG_TMPDIR}" ]; then
+    rm -rf "${TG_TMPDIR}"
+  fi
+  return 0
+}
+trap cleanup EXIT
+
 # --- Restore directly from Telegram by message id ---
 # Usage: restore --from-telegram <message_id> [--chat <chat_id>] [target_db]
 if [ "$1" = "--from-telegram" ]; then
@@ -49,7 +68,6 @@ if [ "$1" = "--from-telegram" ]; then
   fi
 
   TG_TMPDIR=$(mktemp -d)
-  trap 'rm -rf "${TG_TMPDIR}"' EXIT
   echo "⬇️ Downloading backup from Telegram (message ${TG_MESSAGE_ID}, chat ${TG_CHAT})..."
   # Capture inside the `if` condition: under `set -e` a bare `VAR=$(failing-cmd)`
   # assignment would abort before our friendly check runs; `if` conditions are exempt.
@@ -95,7 +113,7 @@ if [ -z "${BACKUP_FILE}" ]; then
       fi
       MOD_DATE=$(date -r "${FILEPATH}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "unknown")
       printf "  [%2d] %-6s  %s  %s/%s\n" "${INDEX}" "${SIZE}" "${MOD_DATE}" "${SLOT}" "${FILENAME}"
-    done < <(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 \( -type f -o -type d \) 2>/dev/null | sort -r)
+    done < <(find "${SLOT_DIR}" -maxdepth 1 -mindepth 1 ! -name '.*' \( -type f -o -type d \) 2>/dev/null | sort -r)
   done
 
   if [ "${INDEX}" -eq 0 ]; then
@@ -133,8 +151,8 @@ fi
 # Extract database name from filename if target not specified
 if [ -z "${TARGET_DB}" ]; then
   BASENAME=$(basename "${BACKUP_FILE}")
-  # Strip suffixes: .gpg, .sql.gz, date patterns
-  TARGET_DB=$(echo "${BASENAME}" | sed -E 's/\.(gpg|sql\.gz|tar\.gz)//g; s/-(latest|[0-9]{8}(-[0-9]{6})?|[0-9]{6}|[0-9]{4}[0-9]{2})$//')
+  # Strip the trailing suffixes (.gpg, .gz, .tar, .sql, .dump) and the date pattern
+  TARGET_DB=$(echo "${BASENAME}" | sed -E 's/(\.(gpg|gz|tar|sql|dump))+$//; s/-(latest|[0-9]{8}(-[0-9]{6})?|[0-9]{6}|[0-9]{4}[0-9]{2})$//')
   if [ -z "${TARGET_DB}" ] || [ "${TARGET_DB}" = "cluster" ]; then
     echo "❌ Cannot determine target database from filename. Please specify it as the second argument." >&2
     exit 1
@@ -163,22 +181,44 @@ if [ -t 0 ]; then
 fi
 
 RESTORE_FILE="${BACKUP_FILE}"
-TEMP_FILES=""
 
-# Step 1: Decrypt if GPG-encrypted
+# Step 1: GPG-encrypted backups are decrypted with a passphrase file, never a
+# command-line key. Custom-format and SQL dumps stream straight into the restore
+# (no clear copy on disk); only a tar-archived directory dump needs a temp file.
+STREAM_DECRYPT="FALSE"
 if [[ "${RESTORE_FILE}" == *.gpg ]]; then
   if [ -z "${BACKUP_ENCRYPTION_KEY}" ]; then
     echo "❌ File is GPG-encrypted but BACKUP_ENCRYPTION_KEY is not set." >&2
     exit 1
   fi
-  echo "🔓 Decrypting backup..."
-  DECRYPTED_FILE="${RESTORE_FILE%.gpg}"
-  DECRYPTED_FILE="/tmp/$(basename "${DECRYPTED_FILE}")"
-  gpg --decrypt --batch --yes --passphrase "${BACKUP_ENCRYPTION_KEY}" \
-    -o "${DECRYPTED_FILE}" "${RESTORE_FILE}"
-  RESTORE_FILE="${DECRYPTED_FILE}"
-  TEMP_FILES="${DECRYPTED_FILE}"
+  KEYFILE="$(mktemp)"
+  printf '%s' "${BACKUP_ENCRYPTION_KEY}" > "${KEYFILE}"
+  if [[ "${RESTORE_FILE%.gpg}" == *.tar.gz ]]; then
+    echo "🔓 Decrypting backup..."
+    DECRYPTED_FILE="/tmp/$(basename "${RESTORE_FILE%.gpg}")"
+    if ! gpg --batch --yes --quiet --no-symkey-cache --decrypt --passphrase-file "${KEYFILE}" \
+      -o "${DECRYPTED_FILE}" "${RESTORE_FILE}"; then
+      echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
+      exit 1
+    fi
+    RESTORE_FILE="${DECRYPTED_FILE}"
+    TEMP_FILES="${TEMP_FILES} ${DECRYPTED_FILE}"
+  else
+    echo "🔓 Decrypting backup into the restore stream..."
+    STREAM_DECRYPT="TRUE"
+  fi
 fi
+
+# The backup's bytes on stdout: decrypted on the fly when encrypted.
+backup_stream() {
+  if [ "${STREAM_DECRYPT}" = "TRUE" ]; then
+    gpg --batch --quiet --no-symkey-cache --decrypt --passphrase-file "${KEYFILE}" "${RESTORE_FILE}"
+  else
+    cat "${RESTORE_FILE}"
+  fi
+}
+# Without .gpg, the name tells the format.
+RESTORE_NAME="${RESTORE_FILE%.gpg}"
 
 # Step 2: Handle directory format (possibly tar.gz archived)
 if [[ "${RESTORE_FILE}" == *.tar.gz ]] && [ -f "${RESTORE_FILE}" ]; then
@@ -213,19 +253,32 @@ if [ -d "${RESTORE_FILE}" ]; then
   if ! pg_restore -d "${TARGET_DB}" --clean --if-exists "${RESTORE_FILE}" 2>&1; then
     echo "⚠️ pg_restore completed with warnings (this is often normal for --clean on first restore)."
   fi
-elif [[ "${RESTORE_FILE}" == *.sql.gz ]]; then
+elif [[ "${RESTORE_NAME}" == *.sql.gz ]]; then
   # Compressed SQL dump — could be pg_dumpall (cluster) or pg_dump
   echo "📄 Detected compressed SQL dump."
   if echo "${BACKUP_FILE}" | grep -q "cluster"; then
     echo "🌐 Cluster dump detected. Restoring all databases..."
-    gunzip -c "${RESTORE_FILE}" | psql -d postgres
+    backup_stream | gunzip -c | psql -d postgres
   else
-    gunzip -c "${RESTORE_FILE}" | psql -d "${TARGET_DB}"
+    backup_stream | gunzip -c | psql -d "${TARGET_DB}"
   fi
-elif [[ "${RESTORE_FILE}" == *.sql ]]; then
+elif [[ "${RESTORE_NAME}" == *.sql ]]; then
   # Plain SQL dump
   echo "📄 Detected plain SQL dump."
-  psql -d "${TARGET_DB}" < "${RESTORE_FILE}"
+  backup_stream | psql -d "${TARGET_DB}"
+elif [ "${STREAM_DECRYPT}" = "TRUE" ]; then
+  # Encrypted archive (custom format): decrypt straight into pg_restore
+  echo "📦 Attempting pg_restore (archive format)..."
+  if backup_stream | pg_restore -d "${TARGET_DB}" --clean --if-exists 2>&1; then
+    :
+  else
+    RESTORE_STATUS=("${PIPESTATUS[@]}")
+    if [ "${RESTORE_STATUS[0]}" -ne 0 ]; then
+      echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
+      exit 1
+    fi
+    echo "⚠️ pg_restore completed with warnings."
+  fi
 else
   # Try pg_restore (custom/archive format)
   echo "📦 Attempting pg_restore (archive format)..."
@@ -235,11 +288,6 @@ else
 fi
 
 RESTORE_DURATION=$(( $(date +%s) - RESTORE_START ))
-
-# Cleanup temp files
-for TMP in ${TEMP_FILES}; do
-  rm -rf "${TMP}"
-done
 
 echo "────────────────────────────────────────"
 echo "✅ Restore completed in ${RESTORE_DURATION}s: ${TARGET_DB}@${PGHOST}"
