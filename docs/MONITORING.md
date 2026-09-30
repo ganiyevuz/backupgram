@@ -1,9 +1,12 @@
 # Monitoring
 
-backupgram writes Prometheus metrics after every run and ships a Grafana dashboard and
-alert rules. The metrics come from the files on disk plus the run's results, so they
-survive restarts — and they stop advancing when the container is dead, which the
-"too old" alert catches.
+backupgram can write Prometheus metrics after every run — they are opt-in
+(`METRICS_TEXTFILE_DIR` and/or `METRICS_ENABLE=TRUE`) — and ships a Grafana dashboard
+and alert rules. The metrics come from the files on disk plus the run's results, so
+they survive restarts. With the textfile collector the file stays on disk, so the
+timestamps stop advancing when the container is dead and the "too old" alert catches
+it. With HTTP scraping a dead `backupgram-api` makes the series go stale instead (the
+"too old" expression then returns nothing), which `BackupgramScrapeDown` catches.
 
 ## Two ways to collect them
 
@@ -80,5 +83,9 @@ and no per-database success series.
   your Prometheus data source.
 - Load `monitoring/prometheus/backupgram-alerts.yml` with `rule_files:`. It defines
   `BackupgramBackupTooOld` (> 26 h), `BackupgramBackupMissedTwice` (> 50 h),
-  `BackupgramBackupFailed`, `BackupgramBackupShrank` (below half the 8-day maximum)
-  and `BackupgramLowDisk` (< 1 GiB). The age thresholds assume a daily `SCHEDULE`.
+  `BackupgramBackupFailed` (a database failed in the last run), `BackupgramRunFailed`
+  (the last run failed — this also covers a run that aborted before any database, which
+  has no per-database series), `BackupgramBackupShrank` (below half the 8-day maximum),
+  `BackupgramLowDisk` (< 1 GiB) and `BackupgramScrapeDown` (HTTP scraping only: the
+  target is down for 10 minutes; change `job="backupgram"` in the rule to your scrape
+  job name). The age thresholds assume a daily `SCHEDULE`.

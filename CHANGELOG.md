@@ -35,6 +35,8 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer
   expanded against files.
 - `list`, `status` and `GET /backups` ignore dot files (`.part`, `.lock`, metrics).
+- Failure lines (each failed database's `❌ …` line and the `❌ Failed: <dbs>` summary)
+  go to stderr, so `backup > log` no longer captures them: use `2>&1`.
 
 ### Added
 - `POSTGRES_DB_INCLUDE` — glob patterns for auto-discovered databases (also changeable
@@ -46,8 +48,9 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   `weekly/` and `monthly/` copies stay until retention removes them.
 - `BACKUP_MIN_BYTES`, `BACKUP_GID`.
 - Prometheus metrics (`METRICS_TEXTFILE_DIR`, `METRICS_ENABLE` → `GET /metrics`), a
-  Grafana dashboard and alert rules under `monitoring/`. `METRICS_ENABLE=TRUE` without
-  `REST_API_ENABLE` runs a metrics-only server (`/healthz` and `/metrics`, no token).
+  Grafana dashboard and alert rules under `monitoring/` (backup too old, missed twice,
+  database failed, run failed, dump shrank, low disk, scrape down). `METRICS_ENABLE=TRUE`
+  without `REST_API_ENABLE` runs a metrics-only server (`/healthz` and `/metrics`, no token).
   `/metrics` is unauthenticated and lists database names: keep `REST_API_PORT` on an
   internal network. See `docs/MONITORING.md`.
 

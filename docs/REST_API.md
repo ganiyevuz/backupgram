@@ -4,7 +4,8 @@ The image ships an optional HTTP API that lets you trigger backups, inspect
 state, download or delete backup files, initiate restores, and change a
 whitelisted subset of runtime settings — all over plain HTTP with a bearer
 token. When disabled (the default) nothing changes: `go-cron` is PID 1 exactly
-as before.
+as before — unless `METRICS_ENABLE=TRUE`, which also puts `backupgram-api` in front
+(see [Metrics-only mode](#metrics-only-mode)).
 
 - [Enabling the API](#enabling-the-api)
 - [Authentication](#authentication)

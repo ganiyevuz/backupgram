@@ -4,8 +4,9 @@ groups:
   - name: backupgram
     rules:
       - alert: BackupgramBackupTooOld
-        # 26 h: one missed nightly run plus slack. Also fires when the container is dead,
-        # because the timestamp comes from the newest file on disk.
+        # 26 h: one missed nightly run plus slack. With the textfile collector this also fires
+        # when the container is dead, because the file stays on disk. With HTTP scraping a dead
+        # backupgram-api makes the series go stale instead: see BackupgramScrapeDown.
         expr: time() - backupgram_backup_last_timestamp_seconds > 26 * 3600
         labels: { severity: warning }
         annotations:
@@ -26,12 +27,30 @@ groups:
           summary: "The last {{ $labels.project }} {{ $labels.database }} backup failed"
           description: "Its previous dump is kept. The container's log says why."
 
+      - alert: BackupgramRunFailed
+        # Also covers a run that aborted before any database (server unreachable, low disk,
+        # discovery found nothing): those runs have no backupgram_backup_success series.
+        expr: backupgram_run_success == 0
+        labels: { severity: warning }
+        annotations:
+          summary: "The last {{ $labels.project }} backup run failed"
+          description: "The container's log says why."
+
       - alert: BackupgramBackupShrank
         expr: backupgram_backup_last_size_bytes < 0.5 * max_over_time(backupgram_backup_last_size_bytes[8d])
         labels: { severity: warning }
         annotations:
           summary: "The newest {{ $labels.project }} {{ $labels.database }} dump is less than half the largest of 8 days"
           description: "A dump cut short, or a lot of data gone. Check it before relying on it."
+
+      - alert: BackupgramScrapeDown
+        # HTTP scraping only; change job= to your scrape job name.
+        expr: up{job="backupgram"} == 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Prometheus cannot scrape backupgram's /metrics"
+          description: "backupgram-api is down or unreachable, so the other alerts cannot fire."
 
       - alert: BackupgramLowDisk
         # 1 GiB: raise it for large databases (a dump needs room for itself before the old one goes).

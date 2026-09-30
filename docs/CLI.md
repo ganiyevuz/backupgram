@@ -46,6 +46,11 @@ Backup completed in 12s: 1 succeeded, 0 failed, 0 skipped
 - `75` — another run holds `${BACKUP_DIR}/.lock`; nothing was started or changed.
   Containers sharing a backup volume share the lock.
 
+Failure lines go to **stderr**: each per-database `❌ …` line and the
+`❌ Failed: <dbs>` summary line. `backup > backup.log` therefore misses them;
+capture both streams (`backup > backup.log 2>&1`). The rest of the output,
+including `Backup completed in …`, goes to stdout.
+
 The `error` hook does not run for a failed database, so alert on the exit code or
 on the [metrics](MONITORING.md).
 
