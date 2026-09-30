@@ -1,13 +1,13 @@
 # backupgram
 
-> A pure-Bash Docker image that runs automated PostgreSQL backups on a cron
+> A Docker image (Bash scripts plus two small Go binaries) that runs automated PostgreSQL backups on a cron
 > schedule, with rotating retention, Telegram delivery (Bot API + MTProto),
 > optional GPG encryption, webhooks, multi-chat fan-out, auto-discovery of
 > databases, an optional HTTP REST control API, and built-in restore tooling.
 > Published as `ganiyevuz/backupgram:<pg-version>[-alpine]`.
 
 ## Core Files
-- [scripts/init.sh]: ENTRYPOINT — validates config, then execs go-cron with SCHEDULE
+- [scripts/init.sh]: ENTRYPOINT — validates config, then execs backupgram-api (REST_API_ENABLE=TRUE, which supervises go-cron) or go-cron directly with SCHEDULE
 - [scripts/env.sh]: dual-purpose config — sourced for validation/var resolution, executed standalone at startup
 - [scripts/backup.sh]: the backup cycle — dump, verify, encrypt, rotate, send to Telegram, prune
 - [scripts/restore.sh]: restore tooling — interactive, by file, cross-database, or --from-telegram
@@ -16,7 +16,7 @@
 - [hooks/]: run-parts hooks (pre-backup | post-backup | error); 00-webhook implements WEBHOOK_* vars
 - [docker/debian.Dockerfile, docker/alpine.Dockerfile]: image definitions; kept in lockstep (identical ENV + symlinks)
 - [generate-docker-bake.sh]: source of truth for docker-bake.hcl (generated — do not hand-edit)
-- [.github/workflows/ci.yml]: runs scripts against a live postgres:16, then builds/publishes images
+- [.github/workflows/ci.yml]: vets/tests both Go modules, runs scripts against a live postgres:16, then builds/publishes images
 
 ## Documentation
 - [README.md]: quick start, environment variables, CLI commands, how backups work, hooks
