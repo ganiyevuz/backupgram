@@ -106,7 +106,7 @@ ok "§10.4 RLS guard failed pharmacy_beta and kept its dump"
 # §10.5 + §10.6 — a run stuck on a lock is killed mid-run: the previous dump survives, and a
 # second run meanwhile exits 75; the next run removes any .part.
 alpha_before=$(in_runner 'stat -c %i /backups/last/pharmacy_alpha-*.dump.gpg')
-in_runner "PGHOST=db PGPASSWORD=svc_pw psql -X -q -U svc_control_api -d pharmacy_alpha -c 'BEGIN' -c 'LOCK TABLE br02.otdel IN ACCESS EXCLUSIVE MODE' -c 'SELECT pg_sleep(12)' -c 'COMMIT'" &
+in_runner "PGHOST=db PGPASSWORD=svc_pw psql -X -q -U svc_control_api -d pharmacy_alpha -c 'BEGIN' -c 'LOCK TABLE br02.otdel IN ACCESS EXCLUSIVE MODE' -c 'SELECT pg_sleep(30)' -c 'COMMIT'" &
 locker=$!
 sleep 2
 "${COMPOSE[@]}" exec -d backup /backup.sh
@@ -114,9 +114,12 @@ sleep 4
 run_job
 [ "${RC}" = "75" ] || fail "§10.6 second run exited ${RC}, expected 75"
 has "Another backup run holds /backups/.lock. Not started."
-# "[/]backup[.]sh" matches the run's command line but not this sh -c's own, which a plain
-# "/backup.sh" pattern would SIGKILL before it reached pg_dump and gpg.
-"${COMPOSE[@]}" exec -T backup sh -c 'pkill -9 -f "[/]backup[.]sh"; pkill -9 pg_dump; pkill -9 gpg; true'
+[ -n "$(in_runner 'find /backups/last -name ".*.part"')" ] || fail "§10.6 no .part present while the run was stuck (or the locked-out run removed it)"
+# "bash [/]backup[.]sh" matches the run's command line (bash /backup.sh) but neither this
+# sh -c's own, which a plain "/backup.sh" pattern would SIGKILL before it reached pg_dump
+# and gpg, nor go-cron's (-- /backup.sh).
+"${COMPOSE[@]}" exec -T backup sh -c 'pkill -9 -f "bash [/]backup[.]sh"; pkill -9 pg_dump; pkill -9 gpg; true'
+[ -n "$(in_runner 'find /backups/last -name ".*.part"')" ] || fail "§10.5 no .part left by the killed run"
 wait "${locker}" || true
 [ "$(in_runner 'stat -c %i /backups/last/pharmacy_alpha-*.dump.gpg')" = "${alpha_before}" ] || fail "§10.5 the killed run replaced pharmacy_alpha's dump"
 run_job
