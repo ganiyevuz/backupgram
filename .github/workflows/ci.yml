@@ -225,6 +225,7 @@ jobs:
           REST_API_ENABLE: "TRUE"
           REST_API_TOKEN: "ci-secret"
           REST_API_PORT: "8099"
+          METRICS_ENABLE: "TRUE"
         run: |
           go build -C rest-api -o /usr/local/bin/backupgram-api .
           # The API submits jobs that exec the in-image absolute paths; link the repo scripts there.
@@ -254,6 +255,8 @@ jobs:
             sleep 1
           done
           test "$STATE" = "succeeded" || { echo "job did not finish: $STATE"; exit 1; }
+          # /metrics is open (no token) and carries the run's result
+          curl -sf localhost:8099/metrics | grep -q '^backupgram_run_success{'
           # the backup appears in the inventory
           curl -s "${AUTH[@]}" localhost:8099/backups | grep -q '"name"'
           # config PATCH writes the override file

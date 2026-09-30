@@ -18,7 +18,7 @@ func ResolveBackupPath(backupDir, slot, name string) (string, error) {
 		return "", &httpx.Error{Status: 404, Msg: "unknown slot: " + slot}
 	}
 	base := filepath.Base(name)
-	if base != name || base == "." || base == ".." || base == "/" || strings.TrimSpace(base) == "" {
+	if base != name || base == "." || base == ".." || base == "/" || strings.TrimSpace(base) == "" || strings.HasPrefix(base, ".") {
 		return "", &httpx.Error{Status: 400, Msg: "invalid backup name"}
 	}
 	slotDir := filepath.Join(backupDir, slot)
@@ -45,6 +45,9 @@ func List(backupDir string) []Entry {
 			continue
 		}
 		for _, it := range items {
+			if strings.HasPrefix(it.Name(), ".") {
+				continue
+			}
 			if it.IsDir() {
 				continue
 			}

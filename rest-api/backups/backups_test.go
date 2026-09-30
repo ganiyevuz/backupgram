@@ -58,3 +58,27 @@ func TestListEmptyIsNonNilEmpty(t *testing.T) {
 		t.Errorf("len=%d want 0", len(out))
 	}
 }
+
+func TestListSkipsDotFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "last"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"db-20260101-000000.dump.gpg", ".db-20260101-000001.dump.gpg.part", ".metrics.prom"} {
+		if err := os.WriteFile(filepath.Join(dir, "last", n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := List(dir)
+	if len(got) != 1 || got[0].Name != "db-20260101-000000.dump.gpg" {
+		t.Fatalf("got %+v, want only the real dump", got)
+	}
+}
+
+func TestResolveBackupPathRejectsDotFiles(t *testing.T) {
+	for _, name := range []string{".db-20260101-000000.dump.gpg.part", ".lock", ".metrics.prom"} {
+		if _, err := ResolveBackupPath(t.TempDir(), "last", name); err == nil {
+			t.Errorf("expected an error for %q", name)
+		}
+	}
+}

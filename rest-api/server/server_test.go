@@ -38,7 +38,7 @@ func do(t *testing.T, h *handlers.Handlers, method, path, token, body string) *h
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
-	Router("secret", h).ServeHTTP(rec, req)
+	Router(Options{Token: "secret", REST: true}, h).ServeHTTP(rec, req)
 	return rec
 }
 
@@ -173,5 +173,62 @@ func TestBackupRouteAndJobQuery(t *testing.T) {
 	rec = do(t, h, "GET", "/jobs/"+backupResp.JobID, "secret", "")
 	if rec.Code != 200 {
 		t.Fatalf("GET /jobs/%s code=%d want 200 body=%s", backupResp.JobID, rec.Code, rec.Body)
+	}
+}
+
+func doWith(t *testing.T, opts Options, h *handlers.Handlers, method, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	Router(opts, h).ServeHTTP(rec, req)
+	return rec
+}
+
+func TestMetricsServesFileWithoutAuth(t *testing.T) {
+	h := newTestHandlers(t)
+	body := "# HELP backupgram_run_success x\n# TYPE backupgram_run_success gauge\nbackupgram_run_success{project=\"\"} 1\n"
+	if err := os.WriteFile(filepath.Join(h.BackupDir, ".metrics.prom"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := doWith(t, Options{Token: "secret", REST: true, Metrics: true}, h, "GET", "/metrics", "")
+	if rec.Code != 200 {
+		t.Fatalf("code=%d want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/plain; version=0.0.4; charset=utf-8" {
+		t.Fatalf("content-type=%q", ct)
+	}
+	if rec.Body.String() != body {
+		t.Fatalf("body=%q want %q", rec.Body.String(), body)
+	}
+}
+
+func TestMetricsMissingFileIsEmpty200(t *testing.T) {
+	h := newTestHandlers(t)
+	rec := doWith(t, Options{Metrics: true}, h, "GET", "/metrics", "")
+	if rec.Code != 200 || rec.Body.Len() != 0 {
+		t.Fatalf("code=%d body=%q, want 200 and empty before the first run", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMetricsOnlyModeHasNoRESTRoutes(t *testing.T) {
+	h := newTestHandlers(t)
+	opts := Options{Metrics: true}
+	if rec := doWith(t, opts, h, "GET", "/healthz", ""); rec.Code != 200 {
+		t.Fatalf("healthz code=%d want 200", rec.Code)
+	}
+	for _, p := range []struct{ method, path string }{{"GET", "/status"}, {"POST", "/backup"}, {"GET", "/backups"}} {
+		if rec := doWith(t, opts, h, p.method, p.path, "secret"); rec.Code != 404 {
+			t.Fatalf("%s %s code=%d want 404 in metrics-only mode", p.method, p.path, rec.Code)
+		}
+	}
+}
+
+func TestMetricsDisabledIsNotServed(t *testing.T) {
+	h := newTestHandlers(t)
+	if rec := doWith(t, Options{Token: "secret", REST: true}, h, "GET", "/metrics", "secret"); rec.Code != 404 {
+		t.Fatalf("code=%d want 404 when METRICS_ENABLE is off", rec.Code)
 	}
 }

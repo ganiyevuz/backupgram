@@ -74,3 +74,37 @@ func TestResolveTokenFileUnreadableFailsClosed(t *testing.T) {
 		t.Fatal("expected error when REST_API_TOKEN_FILE is set but unreadable (must not fall back to env)")
 	}
 }
+
+func TestStartupNothingEnabled(t *testing.T) {
+	t.Setenv("REST_API_ENABLE", "FALSE")
+	t.Setenv("METRICS_ENABLE", "FALSE")
+	if _, err := startup(); err == nil {
+		t.Fatal("expected an error when neither REST_API_ENABLE nor METRICS_ENABLE is TRUE")
+	}
+}
+
+func TestStartupMetricsOnlyNeedsNoToken(t *testing.T) {
+	t.Setenv("REST_API_ENABLE", "")
+	t.Setenv("METRICS_ENABLE", "TRUE")
+	t.Setenv("REST_API_TOKEN", "")
+	t.Setenv("REST_API_TOKEN_FILE", "")
+	m, err := startup()
+	if err != nil || m.rest || !m.metrics || m.token != "" {
+		t.Fatalf("got %+v err %v, want metrics only, no token", m, err)
+	}
+}
+
+func TestStartupRESTNeedsToken(t *testing.T) {
+	t.Setenv("REST_API_ENABLE", "TRUE")
+	t.Setenv("METRICS_ENABLE", "")
+	t.Setenv("REST_API_TOKEN", "")
+	t.Setenv("REST_API_TOKEN_FILE", "")
+	if _, err := startup(); err == nil {
+		t.Fatal("expected an error: REST API without a token")
+	}
+	t.Setenv("REST_API_TOKEN", "tok")
+	m, err := startup()
+	if err != nil || !m.rest || m.metrics || m.token != "tok" {
+		t.Fatalf("got %+v err %v, want rest with token tok", m, err)
+	}
+}

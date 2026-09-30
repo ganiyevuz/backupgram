@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -44,16 +45,39 @@ func gocronArgs(schedule string, initialRun bool) []string {
 	return append(args, "--", "/backup.sh")
 }
 
-func main() {
-	if os.Getenv("REST_API_ENABLE") != "TRUE" {
-		log.Fatal("REST_API_ENABLE is not TRUE; nothing to do")
+// modes says which route groups to serve, and the REST API's token.
+type modes struct {
+	rest, metrics bool
+	token         string
+}
+
+// startup reads REST_API_ENABLE / METRICS_ENABLE. A token is required only for the REST API.
+func startup() (modes, error) {
+	m := modes{
+		rest:    os.Getenv("REST_API_ENABLE") == "TRUE",
+		metrics: os.Getenv("METRICS_ENABLE") == "TRUE",
+	}
+	if !m.rest && !m.metrics {
+		return modes{}, errors.New("neither REST_API_ENABLE nor METRICS_ENABLE is TRUE; nothing to do")
+	}
+	if !m.rest {
+		return m, nil
 	}
 	token, err := resolveToken()
 	if err != nil {
-		log.Fatal(err)
+		return modes{}, err
 	}
 	if token == "" {
-		log.Fatal("REST_API_ENABLE=TRUE requires REST_API_TOKEN or REST_API_TOKEN_FILE")
+		return modes{}, errors.New("REST_API_ENABLE=TRUE requires REST_API_TOKEN or REST_API_TOKEN_FILE")
+	}
+	m.token = token
+	return m, nil
+}
+
+func main() {
+	m, err := startup()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	schedule := config.Get("SCHEDULE")
@@ -72,10 +96,10 @@ func main() {
 		RestartSchedule: func(newSchedule string) error { return sup.Restart(gocronArgs(newSchedule, false)) },
 	}
 
-	srv := &http.Server{Addr: ":" + getenvOr("REST_API_PORT", "8081"), Handler: server.Router(token, h)}
+	srv := &http.Server{Addr: ":" + getenvOr("REST_API_PORT", "8081"), Handler: server.Router(server.Options{Token: m.token, REST: m.rest, Metrics: m.metrics}, h)}
 
 	go func() {
-		log.Printf("backupgram-api listening on %s", srv.Addr)
+		log.Printf("backupgram-api listening on %s (rest=%t, metrics=%t)", srv.Addr, m.rest, m.metrics)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}

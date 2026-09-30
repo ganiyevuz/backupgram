@@ -31,6 +31,7 @@ var mutableKeys = map[string]keySpec{
 	"POSTGRES_DB":              {validate: validateAny},
 	"POSTGRES_DB_AUTODISCOVER": {validate: validateBoolWord},
 	"POSTGRES_DB_EXCLUDE":      {validate: validateAny},
+	"POSTGRES_DB_INCLUDE":      {validate: validateAny},
 	"POSTGRES_EXTRA_OPTS":      {validate: validateAny},
 	"POSTGRES_EXCLUDE_TABLES":  {validate: validateAny},
 	"TELEGRAM_CHAT_ID":         {validate: validateAny},

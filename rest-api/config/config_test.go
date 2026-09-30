@@ -131,3 +131,10 @@ func TestValidateCronEveryRequiresDuration(t *testing.T) {
 		t.Error("@every 1h must be accepted")
 	}
 }
+
+func TestValidatePatchAcceptsDBInclude(t *testing.T) {
+	withBackupDir(t)
+	if err := ValidatePatch(map[string]string{"POSTGRES_DB_INCLUDE": "control,pharmacy_*"}); err != nil {
+		t.Fatalf("POSTGRES_DB_INCLUDE rejected: %v", err)
+	}
+}
