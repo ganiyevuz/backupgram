@@ -50,18 +50,20 @@ update_latest() {
   fi
 }
 
-# Prints the database of a stamped name <db>-YYYYMMDD-HHMMSS<suffix>; fails for any
-# other name. The stamp is always the last 15 characters before the suffix, so a
-# database name may itself contain hyphens and digits (keep-20260101).
+# Prints the database of a stamped name <db>-YYYYMMDD-HHMMSS<suffix>; prints nothing
+# for any other name. The stamp is always the last 15 characters before the suffix, so
+# a database name may itself contain hyphens and digits (keep-20260101). Never fails:
+# it runs inside $(…), where set -E hands it the ERR trap.
 stamped_db_name() {
   local name="$1" suffix="$2" base
-  [[ "${name}" == *"${suffix}" ]] || return 1
+  [[ "${name}" == *"${suffix}" ]] || return 0
   base="${name%"${suffix}"}"
-  [[ "${base}" =~ ^(.+)-[0-9]{8}-[0-9]{6}$ ]] || return 1
+  [[ "${base}" =~ ^(.+)-[0-9]{8}-[0-9]{6}$ ]] || return 0
   printf '%s' "${BASH_REMATCH[1]}"
 }
 
-# Removes DB's older dumps from last/, now that KEEP is in place.
+# Removes DB's older dumps from last/, now that KEEP is in place. Names that are not
+# stamped (the -latest link) give an empty database name and are left alone.
 prune_last_for_db() {
   local db="$1" keep="$2" suffix="$3" f n
   for f in "${BACKUP_DIR}/last/"*; do
@@ -141,25 +143,28 @@ apply_retention() {
 # snapshot layout: last/ holds the newest dump of each database that still exists.
 # A dropped database's dump and its -latest entry (link or copy) leave last/; its
 # daily/weekly/monthly links age out normally. If the server cannot be listed,
-# nothing is removed.
+# nothing is removed. Non-zero only when a removal fails.
 prune_dropped_databases() {
   local suffix="$1" existing f n db dropped=""
   [ "${BACKUP_LAYOUT}" = "snapshot" ] || return 0
   [ "${POSTGRES_CLUSTER}" != "TRUE" ] || return 0
-  if ! existing=$(psql -X -d postgres -tAc "SELECT datname FROM pg_database") || [ -z "${existing}" ]; then
+  # `|| exit 1` inside the $(…): the failure is handled there, so the ERR trap set -E
+  # hands to the substitution never sees it, and the substitution still exits 1.
+  if ! existing=$(psql -X -d postgres -tAc "SELECT datname FROM pg_database" || exit 1) || [ -z "${existing}" ]; then
     echo "⚠️ Could not list the server's databases; no dropped database's dump was removed." >&2
     return 0
   fi
   for f in "${BACKUP_DIR}/last/"*; do
     [ -e "${f}" ] || continue
     n="$(basename "${f}")"
-    db="$(stamped_db_name "${n}" "${suffix}")" || continue
+    db="$(stamped_db_name "${n}" "${suffix}")"
+    [ -n "${db}" ] || continue
     if ! grep -qxF -- "${db}" <<< "${existing}"; then
-      rm -rf "${f}"
+      rm -rf "${f}" || return 1
       # Once per database, however many of its dumps last/ still held.
       if ! grep -qxF -- "${db}" <<< "${dropped}"; then
         dropped+="${db}"$'\n'
-        rm -rf "${BACKUP_DIR}/last/${db}-latest${suffix}"
+        rm -rf "${BACKUP_DIR}/last/${db}-latest${suffix}" || return 1
         echo "🗑️ ${db} no longer exists: its dump left last/ (daily/weekly/monthly keep theirs)"
       fi
     fi

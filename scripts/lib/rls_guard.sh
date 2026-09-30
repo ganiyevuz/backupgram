@@ -31,9 +31,10 @@ where c.relrowsecurity and c.relkind in ('r', 'p') and exists (
                     where r <> 0::oid and pg_has_role(current_user, r, 'MEMBER'))))"
 
 # Runs both checks in DB. 0 when the login reads every row; otherwise logs and returns 1.
+# `|| exit 1` keeps a psql failure away from the ERR trap the $(…) inherits (set -E).
 rls_guard_check() {
   local db="$1" unread restricted
-  if ! unread=$(psql -X -d "${db}" -tAc "${RLS_UNREAD_TABLES}"); then
+  if ! unread=$(psql -X -d "${db}" -tAc "${RLS_UNREAD_TABLES}" || exit 1); then
     echo "❌ ${db}: could not check row-level security. Previous dump kept." >&2
     return 1
   fi
@@ -41,7 +42,7 @@ rls_guard_check() {
     echo "❌ ${db}: row-level security without a full-read policy for ${PGUSER}: ${unread}. Previous dump kept." >&2
     return 1
   fi
-  if ! restricted=$(psql -X -d "${db}" -tAc "${RLS_RESTRICTED_TABLES}"); then
+  if ! restricted=$(psql -X -d "${db}" -tAc "${RLS_RESTRICTED_TABLES}" || exit 1); then
     echo "❌ ${db}: could not check row-level security. Previous dump kept." >&2
     return 1
   fi

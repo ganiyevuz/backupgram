@@ -41,8 +41,9 @@ discover_databases() {
   DISCOVER_SKIPPED=""
   echo "🔍 Auto-discovering databases..."
   # Constant SQL: include/exclude are applied in Bash, so user text never reaches SQL.
+  # `|| exit 1` keeps a psql failure away from the ERR trap the $(…) inherits (set -E).
   if ! listing=$(psql -X -d postgres -tA -F '|' -c \
-    "SELECT datname, has_database_privilege(datname, 'CONNECT') FROM pg_database WHERE datallowconn AND NOT datistemplate AND datname <> 'postgres' ORDER BY datname"); then
+    "SELECT datname, has_database_privilege(datname, 'CONNECT') FROM pg_database WHERE datallowconn AND NOT datistemplate AND datname <> 'postgres' ORDER BY datname" || exit 1); then
     echo "❌ Error: database auto-discovery query failed. Aborting." >&2
     return 1
   fi

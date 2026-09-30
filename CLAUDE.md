@@ -119,7 +119,8 @@ The REST API CI step shows how to run `backupgram-api` outside the image: `go bu
 ## Conventions
 
 - All scripts start with `set -Eeo pipefail`; `backup.sh` traps `ERR` to fire the `error` hook.
-- **A function called in an `if` condition or on the left of `||`/`&&` runs without errexit** (`set -e` is suspended inside it, and the `ERR` trap does not fire). Check every command in such a function (`cmd || return 1`) — `backup_database`, `link_into_slots` and the `lib/` helpers are called that way on purpose, so a failure is handled, not fatal.
+- **A function called in an `if` condition or on the left of `||`/`&&` runs without errexit** (`set -e` is suspended inside it). Check every command in such a function (`cmd || return 1`) — `backup_database`, `link_into_slots` and the `lib/` helpers are called that way on purpose, so a failure is handled, not fatal.
+- **`set -E` hands the `ERR` trap to every command substitution**, so a command failing inside `$(…)` can fire the `error` hook even when the caller handles the result (bash 5.1/5.2 hold it back while the substitution itself sits in a condition — do not rely on that). Keep helpers used inside `$(…)` from failing (`stamped_db_name` prints nothing instead of returning 1), and handle an expected failure inside the substitution: `if ! x=$(psql … || exit 1); then`. `tests/scenarios.sh error_hook_not_fired_on_success` guards this.
 - `pg_dump`/`pg_dumpall` invocations are unquoted-on-purpose to word-split `POSTGRES_EXTRA_OPTS` — keep the `# shellcheck disable=SC2086` directives when touching those lines, and keep pathname expansion off (`set -f`) around them so a glob in `POSTGRES_EXTRA_OPTS` is never expanded against files.
 - User-facing output uses emoji status prefixes (✅ ❌ ⚠️ 🔒) and `────`/`════` rule lines; match the surrounding style.
 - Secrets resolve via `*_FILE` (Docker secrets) taking precedence over the plain env var — preserve that precedence when adding new credentials.

@@ -184,6 +184,9 @@ jobs:
       - name: "Scenario: wrong key on an encrypted SQL dump"
         run: bash tests/scenarios.sh restore_wrong_key_sql
 
+      - name: "Scenario: no error hook on a successful run"
+        run: bash tests/scenarios.sh error_hook_not_fired_on_success
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

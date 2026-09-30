@@ -472,6 +472,32 @@ scenario_list_status_hide_dot_files() {
   grep -q 'backup in progress' <<< "${out}" || fail "status does not see the held lock"
 }
 
+# set -E hands the ERR trap to every $(…): a helper failing inside one must not fire
+# the error hook on a run that succeeds. Snapshot + symlink puts -latest links and an
+# older stamped dump in last/ for the second run to walk past.
+scenario_error_hook_not_fired_on_success() {
+  fresh_backup_dir
+  local hooks record
+  hooks="$(mktemp -d)"
+  record="$(mktemp)"
+  # run-parts only runs names made of [A-Za-z0-9_-].
+  # shellcheck disable=SC2016  # $1 belongs to the hook script
+  printf '#!/bin/sh\necho "$1" >> "%s"\n' "${record}" > "${hooks}/record"
+  chmod +x "${hooks}/record"
+  export HOOKS_DIR="${hooks}" BACKUP_LAYOUT="snapshot" BACKUP_LATEST_TYPE="symlink"
+  run_backup
+  expect_rc 0 "first run"
+  sleep 1
+  run_backup
+  expect_rc 0 "second run"
+  grep -qx 'pre-backup' "${record}" || fail "the pre-backup hook did not run"
+  grep -qx 'post-backup' "${record}" || fail "the post-backup hook did not run"
+  if grep -qx 'error' "${record}"; then
+    fail "the error hook ran $(grep -cx 'error' "${record}") time(s) during successful runs"
+  fi
+  rm -rf "${hooks}" "${record}"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

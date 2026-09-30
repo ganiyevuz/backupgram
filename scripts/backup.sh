@@ -4,8 +4,8 @@ set -Eeo pipefail
 # The real directory of this script: /backup.sh and /usr/local/bin/backup are symlinks.
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
-# Define the error handling function
-HOOKS_DIR="/hooks"
+# Define the error handling function (HOOKS_DIR is overridden by the tests only)
+HOOKS_DIR="${HOOKS_DIR:-/hooks}"
 if [ -d "${HOOKS_DIR}" ]; then
   on_error(){
     run-parts -a "error" "${HOOKS_DIR}"
