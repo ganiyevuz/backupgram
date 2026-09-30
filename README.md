@@ -110,11 +110,15 @@ Full details and the self-hosted Bot API server route: **[docs/LARGE_FILES.md](d
 - **Scheduled backups** via `go-cron` with a configurable `SCHEDULE`.
 - **Rotating retention** — `last` / `daily` / `weekly` / `monthly` slots via space-saving hard links.
 - **Multiple databases** and **cluster-wide** dumps (`pg_dumpall`).
-- **Auto-discover databases** — back up every non-template database on the server (`POSTGRES_DB_AUTODISCOVER`), with an exclude list (`POSTGRES_DB_EXCLUDE`).
-- **Multiple formats** — gzip SQL, directory (`-Fd`), each optionally **GPG AES-256 encrypted**.
+- **Auto-discover databases** — back up every non-template database on the server (`POSTGRES_DB_AUTODISCOVER`), narrowed by include globs (`POSTGRES_DB_INCLUDE`, e.g. `control,pharmacy_*`) and an exclude list (`POSTGRES_DB_EXCLUDE`); databases the login may not `CONNECT` to are skipped and logged.
+- **Multiple formats** — gzip SQL, custom, directory (`-Fd`), each optionally **GPG AES-256 encrypted** (directory dumps excepted).
+- **Safer pipeline** — encryption streams (`pg_dump` piped into GPG, no clear dump on disk, key never on a command line); every dump is written to a `.part` file, fully verified, and only then renamed into place, so a failed or truncated dump never replaces a good one. `backup` exits `1` when a database failed and `75` when another run holds the lock.
+- **Row-level-security guard** — `BACKUP_RLS_GUARD=TRUE` refuses a dump that row-level security would silently cut short.
+- **Snapshot layout** — `BACKUP_LAYOUT=snapshot` keeps timestamped names in every folder (weekly on Sundays, monthly on the 1st) and `last/` holds exactly the newest dump of each existing database.
+- **Prometheus metrics + Grafana dashboard** — per-database backup age, size and result, written for node-exporter's textfile collector or served at `GET /metrics`, with a dashboard and alert rules in [`monitoring/`](monitoring/). See [docs/MONITORING.md](docs/MONITORING.md).
 - **Telegram delivery** — Bot API for small files, **zero-setup MTProto upload up to 2 GB** (a shared app ships in the image), multi-chat fan-out.
 - **Restore tooling** — interactive, by-file, cross-database, or **`--from-telegram`** disaster recovery.
-- **Safety** — backup verification, `pg_isready` and disk-space checks, `flock` against overlapping runs.
+- **Safety** — full backup verification, `pg_isready` and disk-space checks, a lock in `BACKUP_DIR` against overlapping runs.
 - **Integrations** — webhooks (pre/post/error), custom `run-parts` hooks, Docker secrets (`*_FILE`).
 - **REST API (opt-in)** — trigger/observe/restore/download/delete backups and change runtime settings over HTTP, behind a bearer token. See [docs/REST_API.md](docs/REST_API.md).
 
@@ -129,6 +133,7 @@ Full details and the self-hosted Bot API server route: **[docs/LARGE_FILES.md](d
 | [CLI Commands](docs/CLI.md) | `backup`, `restore`, `list`, `status`, `help` with example output |
 | [Architecture](docs/ARCHITECTURE.md) | Runtime chain, backup cycle, rotation model, format branches (C4 + mermaid) |
 | [Large Files](docs/LARGE_FILES.md) | MTProto upload for backups over 50 MB |
+| [Monitoring](docs/MONITORING.md) | Prometheus metrics, Grafana dashboard, alert rules |
 | [REST API](docs/REST_API.md) | Optional HTTP control surface: endpoints, auth, runtime config |
 | [Build](docs/BUILD.md) | Multi-arch image builds |
 | [Changelog](CHANGELOG.md) | Notable changes |
@@ -145,10 +150,13 @@ secrets) variants that take precedence over the plain value. The most common:
 | Variable | Default | Description |
 |---|---|---|
 | `POSTGRES_HOST` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | **required** | Connection + database name(s) |
-| `POSTGRES_DB_AUTODISCOVER` | `FALSE` | Back up every non-template DB (makes `POSTGRES_DB` optional); exclude names via `POSTGRES_DB_EXCLUDE` |
+| `POSTGRES_DB_AUTODISCOVER` | `FALSE` | Back up every non-template DB (makes `POSTGRES_DB` optional); narrow with `POSTGRES_DB_INCLUDE` (globs) and `POSTGRES_DB_EXCLUDE` |
 | `SCHEDULE` | `@daily` | Cron expression for the backup schedule |
 | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | `7` / `4` / `6` | Retention per rotation slot |
+| `BACKUP_LAYOUT` | `period` | `period` or `snapshot` (timestamped names in every folder) |
+| `BACKUP_RLS_GUARD` | `FALSE` | Refuse dumps that row-level security would cut short |
 | `BACKUP_ENCRYPTION_KEY` | `""` | GPG passphrase (enables AES-256 encryption) |
+| `METRICS_TEXTFILE_DIR` / `METRICS_ENABLE` | `""` / `FALSE` | Prometheus metrics: a textfile for node-exporter, and/or `GET /metrics` on `REST_API_PORT` |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | `""` | Telegram delivery (chat id list = fan-out) |
 | `TELEGRAM_USE_DEFAULT_API` | `TRUE` | Use the image's built-in shared app for large-file (2 GB) upload; set `FALSE` to require your own `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` |
 
@@ -174,9 +182,11 @@ See **[CLI Commands](docs/CLI.md)** for usage and example output.
 
 ## How Backups Work
 
-Each cycle writes a timestamped file to `last/`, then hard-links it into `daily/`,
-`weekly/`, and `monthly/` (shared inode — no extra disk). Retention cleanup runs
-after each successful backup, pruning each slot independently.
+Each cycle writes every database's dump to a `.part` file in `last/`, verifies it,
+renames it into place, then hard-links it into `daily/`, `weekly/`, and `monthly/`
+(shared inode — no extra disk). A database that fails keeps its previous dump and
+the run exits `1`. Retention cleanup runs once per run after all databases, over
+every file of each slot, and is skipped when nothing was backed up.
 
 > The `/backups` volume must be a POSIX filesystem with hardlink and symlink
 > support. VFAT, exFAT, and SMB/CIFS are not supported.
@@ -198,6 +208,7 @@ variables — add your own alongside it.
 - Enable `BACKUP_ENCRYPTION_KEY` to encrypt backups at rest with GPG AES-256.
 - The healthcheck runs on an internal port (`8080` by default) — do not expose it publicly unless needed.
 - The optional **REST API** (`REST_API_ENABLE`) listens on `8081` (`REST_API_PORT`) behind a bearer token — bind it to loopback and front it with a TLS-terminating reverse proxy; never expose it directly. See [docs/REST_API.md](docs/REST_API.md).
+- With `METRICS_ENABLE=TRUE`, `GET /metrics` on that same port needs **no token** and lists database names and backup results — keep the port on an internal network. See [docs/MONITORING.md](docs/MONITORING.md).
 
 ### File permissions for the backup volume
 

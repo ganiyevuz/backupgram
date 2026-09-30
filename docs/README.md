@@ -15,6 +15,7 @@ New here? Start with **[Getting Started](GETTING_STARTED.md)**.
 | [CLI Commands](CLI.md) | `backup`, `restore`, `list`, `status`, `help` with example output |
 | [Architecture](ARCHITECTURE.md) | Runtime chain, backup cycle, rotation model, format branches, Telegram delivery (C4 + mermaid) |
 | [Large Files](LARGE_FILES.md) | MTProto upload for backups over 50 MB (up to 2 GB) |
+| [Monitoring](MONITORING.md) | Prometheus metrics, Grafana dashboard, alert rules |
 | [REST API](REST_API.md) | Optional HTTP control surface: endpoints, bearer auth, runtime config editing |
 | [Build](BUILD.md) | Multi-arch image builds with QEMU + buildx |
 

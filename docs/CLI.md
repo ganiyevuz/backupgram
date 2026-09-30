@@ -17,8 +17,8 @@ docker exec -it <container> <command>
 
 ## `backup` — Trigger a manual backup
 
-Runs a full backup cycle immediately: dump, verify, encrypt (if enabled),
-rotate, send to Telegram, and clean old files.
+Runs a full backup cycle immediately: dump each database (encrypting as it
+streams, if enabled), verify, rotate, send to Telegram, and clean old files.
 
 ```sh
 docker exec -it my-backup backup
@@ -28,14 +28,26 @@ docker exec -it my-backup backup
 Checking database connectivity (timeout: 30s)...
 Database is reachable.
 Disk space OK (45032MB available).
-Creating dump of mydb database from postgres...
-Backup created: /backups/last/mydb-20260416-143000.sql.gz (42M, 8s)
-Backup sent to Telegram.
-Cleaning older files for mydb...
+Creating dump of mydb from postgres...
+Backup created: /backups/last/mydb-20260416-143000.sql.gz (42M, 44040192 bytes, 8s)
+Backup sent to Telegram chat 123456789.
 ----------------------------------------
-Backup completed in 12s: 1 succeeded, 0 failed
+Backup completed in 12s: 1 succeeded, 0 failed, 0 skipped
 ----------------------------------------
 ```
+
+### Exit codes
+
+- `0` — every database was dumped.
+- `1` — a database failed (the others still ran) or the run aborted (server
+  unreachable, low disk space, discovery failed or found nothing). The summary
+  lists the failures (`❌ Failed: <dbs>`), and each failed database keeps its
+  previous dump.
+- `75` — another run holds `${BACKUP_DIR}/.lock`; nothing was started or changed.
+  Containers sharing a backup volume share the lock.
+
+The `error` hook does not run for a failed database, so alert on the exit code or
+on the [metrics](MONITORING.md).
 
 ---
 
@@ -43,7 +55,15 @@ Backup completed in 12s: 1 succeeded, 0 failed
 
 Without arguments, shows an interactive picker. With a file path, restores
 directly. Auto-detects format (`.sql.gz`, `.sql.gz.gpg`, directory, tar.gz) and
-handles GPG decryption automatically.
+handles GPG decryption automatically. The target database name is taken from the
+file name (trailing `.gpg`, `.gz`, `.tar`, `.sql`, `.dump` and the date or
+`-latest` are stripped) unless you pass it.
+
+Encrypted dumps stream into the restore (custom-format, `.sql` and `.sql.gz`):
+nothing is decrypted to disk, and the key is passed through a temporary passphrase
+file, never on a command line. A wrong `BACKUP_ENCRYPTION_KEY` or a damaged file
+exits `1` with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
+damaged file).` and restores nothing.
 
 ```sh
 # Interactive mode -- pick from a numbered list
@@ -113,7 +133,8 @@ Restore completed in 15s: mydb@postgres
 ## `list` — List all backups
 
 Shows all backup files grouped by rotation slot with sizes, dates, and
-indicators for `[latest]` and `[encrypted]` files.
+indicators for `[latest]` and `[encrypted]` files. Dot files (an in-progress
+`.part` dump, `.lock`, the metrics file) are not listed.
 
 ```sh
 # List all backups

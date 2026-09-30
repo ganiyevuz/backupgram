@@ -10,6 +10,7 @@ as before.
 - [Authentication](#authentication)
 - [TLS / reverse-proxy warning](#tls--reverse-proxy-warning)
 - [Endpoints](#endpoints)
+- [Metrics-only mode](#metrics-only-mode)
 - [Async jobs](#async-jobs)
 - [Runtime config](#runtime-config)
 - [curl examples](#curl-examples)
@@ -52,6 +53,7 @@ for a ready-to-run compose file.
 | `REST_API_PORT` | `8081` | Listening port (separate from the `8080` healthcheck). |
 | `REST_API_TOKEN` | `""` | Admin bearer token. **Required** when the API is enabled. |
 | `REST_API_TOKEN_FILE` | `""` | Docker-secret path for the token (takes precedence over `REST_API_TOKEN`). |
+| `METRICS_ENABLE` | `FALSE` | Set `TRUE` to also serve `GET /metrics` (see [MONITORING.md](MONITORING.md)). |
 
 ---
 
@@ -59,7 +61,7 @@ for a ready-to-run compose file.
 
 The API key is a single **admin bearer token** you generate yourself and set on
 the container — there is no key-issuing endpoint. Every request (except
-`GET /healthz`) must include:
+`GET /healthz` and `GET /metrics`) must include:
 
 ```
 Authorization: Bearer <token>
@@ -71,7 +73,8 @@ A missing or wrong token returns `401 Unauthorized`. The token is compared in
 `REST_API_TOKEN_FILE`) is set, so it never runs unauthenticated.
 
 `GET /healthz` is intentionally open so load-balancers and orchestrators can
-probe liveness without a credential.
+probe liveness without a credential. `GET /metrics` (only with
+`METRICS_ENABLE=TRUE`) is open too, so Prometheus can scrape it without one.
 
 ### Generate a token
 
@@ -133,6 +136,11 @@ so it is only reachable on the host loopback by default. If you need remote
 access, place a proxy in front and let the proxy handle TLS — never bind
 directly to `0.0.0.0` in a production deployment.
 
+**`GET /metrics` is unauthenticated** and exposes database names and backup
+results on this same port. Keep `REST_API_PORT` on an internal network (the one
+Prometheus shares) or restrict it with a firewall or the reverse proxy; do not
+publish it to the internet.
+
 ---
 
 ## Endpoints
@@ -140,10 +148,11 @@ directly to `0.0.0.0` in a production deployment.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/healthz` | none | Liveness probe → `{"status":"ok"}` |
+| `GET` | `/metrics` | none | Prometheus metrics (only with `METRICS_ENABLE=TRUE`) |
 | `GET` | `/status` | bearer | Config summary + last backup result |
-| `GET` | `/backups` | bearer | Inventory: `[{slot, name, size, mtime}, …]` |
-| `GET` | `/backups/{slot}/{name}` | bearer | Download a dump file |
-| `DELETE` | `/backups/{slot}/{name}?confirm=true` | bearer | Delete a backup (`confirm=true` required) |
+| `GET` | `/backups` | bearer | Inventory: `[{slot, name, size, mtime}, …]` (dot files such as `.part`, `.lock` and the metrics file are not listed) |
+| `GET` | `/backups/{slot}/{name}` | bearer | Download a dump file (a name starting with `.` → `400`) |
+| `DELETE` | `/backups/{slot}/{name}?confirm=true` | bearer | Delete a backup (`confirm=true` required; a name starting with `.` → `400`) |
 | `POST` | `/backup` | bearer | Trigger a backup → `202 {"job_id":"…"}` |
 | `POST` | `/restore` | bearer | Restore a backup → `202 {"job_id":"…"}` |
 | `GET` | `/jobs` | bearer | List all async job states |
@@ -151,6 +160,15 @@ directly to `0.0.0.0` in a production deployment.
 | `GET` | `/config` | bearer | Effective runtime config (secrets masked) |
 | `PATCH` | `/config` | bearer | Update whitelisted keys; all-or-nothing |
 | `DELETE` | `/config/{key}` | bearer | Clear one override (revert to base env) |
+
+### Metrics-only mode
+
+`METRICS_ENABLE=TRUE` **without** `REST_API_ENABLE=TRUE` starts `backupgram-api`
+as a small metrics server: it serves only `GET /healthz` and `GET /metrics` on
+`REST_API_PORT`, every other path is `404`, and no token is needed or read. The
+scheduler is supervised exactly as with the full API. With both set, the REST
+routes are served as described here and `/metrics` stays open. Metrics, the
+dashboard and the alert rules: [MONITORING.md](MONITORING.md).
 
 ### `POST /restore` body
 
@@ -208,6 +226,12 @@ id. Poll `GET /jobs/{id}` until the state is terminal:
 `GET /jobs` returns the full list (most recent first). Job history is kept
 in-memory and cleared on container restart.
 
+A `backup` job is the same run as the `backup` command, so it reports `failed`
+(exit code `1`) when any database failed — the others still ran — or the run
+aborted, and exit code `75` when a scheduled (or other) run already holds
+`${BACKUP_DIR}/.lock`. Both used to report `succeeded`. See
+[CLI.md → Exit codes](CLI.md#exit-codes).
+
 ---
 
 ## Runtime config
@@ -240,6 +264,7 @@ the base environment provides.
 | `POSTGRES_DB` | no |
 | `POSTGRES_DB_AUTODISCOVER` | no |
 | `POSTGRES_DB_EXCLUDE` | no |
+| `POSTGRES_DB_INCLUDE` | no |
 | `POSTGRES_EXTRA_OPTS` | no |
 | `POSTGRES_EXCLUDE_TABLES` | no |
 | `TELEGRAM_CHAT_ID` | no |
@@ -259,7 +284,9 @@ the base environment provides.
 
 Connection credentials (`POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 all `*_FILE` variants), `BACKUP_DIR`, `BACKUP_ENCRYPTION_KEY`, all
-`REST_API_*` keys, `POSTGRES_CLUSTER`, and any startup-only variable are
+`REST_API_*` keys, `POSTGRES_CLUSTER`, the security-relevant settings
+(`BACKUP_RLS_GUARD`, `BACKUP_GID`, `BACKUP_LAYOUT`, `BACKUP_MIN_BYTES`,
+`METRICS_ENABLE`, `METRICS_TEXTFILE_DIR`), and any startup-only variable are
 blocked. Attempting to `PATCH` them returns `403 Forbidden`.
 
 ### `*_FILE` precedence caveat

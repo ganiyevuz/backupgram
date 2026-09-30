@@ -8,6 +8,49 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 
 ## [Unreleased]
 
+### Breaking
+- `backup` exits **75** when another run holds the lock, and **1** when any database
+  failed (the others still run). Both used to exit 0. REST API backup jobs now report
+  these runs as failed.
+- The lock moved from `/tmp/backup.lock` to `${BACKUP_DIR}/.lock`, so containers sharing
+  a backup volume also run one at a time.
+- Every file of a run carries the run's start time (it was each database's dump time).
+
+### Fixed
+- Encryption no longer writes an unencrypted dump to disk first: `pg_dump` is piped into
+  GPG. The key is passed through a temporary passphrase file, never the command line
+  (it was visible in `ps`). `restore` does the same and streams the decryption.
+- A failed or truncated dump never replaces a good one: dumps go to `last/.<name>.part`,
+  are verified in full (custom/tar/directory with `pg_restore`, gzip with `gunzip`,
+  through the decryption pipe), and only then renamed into place. Leftover `.part`
+  files are removed by the next run.
+- Retention covers every file in each folder, so a dropped database's copies age out.
+  It is skipped when no database was backed up in the run, so a total outage never
+  erodes the last good copies.
+- `restore` exits 1 with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
+  damaged file).` when an encrypted dump cannot be decrypted, and restores nothing.
+  The target name derived from the file name also strips a trailing `.dump`.
+- `BACKUP_LATEST_TYPE=hardlink` pointed the `-latest` link at a path relative to the
+  working directory.
+- Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer
+  expanded against files.
+- `list`, `status` and `GET /backups` ignore dot files (`.part`, `.lock`, metrics).
+
+### Added
+- `POSTGRES_DB_INCLUDE` — glob patterns for auto-discovered databases (also changeable
+  through the REST API); databases the login may not `CONNECT` to are skipped and logged.
+- `BACKUP_RLS_GUARD` — refuses a dump that row-level security would silently cut short.
+- `BACKUP_LAYOUT=snapshot` — timestamped names in every folder, weekly on Sundays,
+  monthly on the 1st, `last/` holds exactly the newest dump of each existing database.
+  A dropped database's dump and its `-latest` entry leave `last/`; its `daily/`,
+  `weekly/` and `monthly/` copies stay until retention removes them.
+- `BACKUP_MIN_BYTES`, `BACKUP_GID`.
+- Prometheus metrics (`METRICS_TEXTFILE_DIR`, `METRICS_ENABLE` → `GET /metrics`), a
+  Grafana dashboard and alert rules under `monitoring/`. `METRICS_ENABLE=TRUE` without
+  `REST_API_ENABLE` runs a metrics-only server (`/healthz` and `/metrics`, no token).
+  `/metrics` is unauthenticated and lists database names: keep `REST_API_PORT` on an
+  internal network. See `docs/MONITORING.md`.
+
 ## [2026.7.0] - 2026-07-10
 
 ### Added

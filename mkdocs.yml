@@ -54,6 +54,7 @@ nav:
   - CLI Commands: CLI.md
   - REST API: REST_API.md
   - Large Files: LARGE_FILES.md
+  - Monitoring: MONITORING.md
   - Architecture: ARCHITECTURE.md
   - Build: BUILD.md
 

@@ -2,8 +2,9 @@
 
 This image is a pure-Bash backup runner baked into a PostgreSQL base image —
 there is no application runtime. A cron scheduler (`go-cron`) invokes
-`backup.sh` on a schedule; the script dumps, verifies, encrypts, rotates,
-delivers to Telegram, and prunes.
+`backup.sh` on a schedule; the script dumps each database (encrypting as it
+streams), verifies the result, rotates it, delivers it to Telegram, prunes old
+files, and writes Prometheus metrics.
 
 - [System context (C4 L1)](#system-context-c4-l1)
 - [Containers & processes (C4 L2)](#containers--processes-c4-l2)
@@ -33,6 +34,7 @@ flowchart TB
     runner -->|upload backups + alerts| tg
     runner -->|JSON payloads| hook
     runner -->|write / rotate / prune| vol
+    runner -->|"metrics (textfile or /metrics)"| prom["Prometheus<br/><i>+ Grafana dashboard, alert rules</i>"]
 ```
 
 ---
@@ -45,16 +47,21 @@ flowchart TB
         init["init.sh<br/><i>ENTRYPOINT</i>"]
         env["env.sh<br/><i>config validation + var resolution</i>"]
         cron["go-cron<br/><i>scheduler + healthcheck HTTP server</i>"]
+        api["backupgram-api<br/><i>Go: REST API and/or GET /metrics;<br/>supervises go-cron</i>"]
         backup["backup.sh<br/><i>core backup cycle</i>"]
+        lib["scripts/lib/*.sh<br/><i>layout, dump, discover,<br/>rls_guard, metrics</i>"]
         restore["restore.sh<br/><i>restore tooling</i>"]
         hooks["hooks/ (run-parts)<br/><i>pre-backup | post-backup | error</i>"]
         tgupload["tg-upload<br/><i>Go/MTProto binary, &le;2GB</i>"]
     end
 
     init -->|"VALIDATE_ON_START"| env
-    init -->|exec| cron
+    init -->|"exec (default)"| cron
+    init -->|"exec when REST_API_ENABLE or METRICS_ENABLE"| api
+    api -->|supervises| cron
     cron -->|"per SCHEDULE"| backup
     backup -->|source| env
+    backup -->|source| lib
     backup -->|run-parts| hooks
     backup -->|">50MB or method=mtproto"| tgupload
     restore -->|source| env
@@ -68,12 +75,22 @@ flowchart TB
 ```
 init.sh (ENTRYPOINT)
   └─ /env.sh            # standalone validation when VALIDATE_ON_START=TRUE
-  └─ exec go-cron -s "$SCHEDULE" -- /backup.sh
+  ├─ REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE:  exec backupgram-api   # supervises go-cron
+  └─ otherwise:                                    exec go-cron -s "$SCHEDULE" -- /backup.sh
 ```
 
 `go-cron` (from prodrigestivill/go-cron, downloaded in the Dockerfile) owns the
 schedule and serves the healthcheck on `HEALTHCHECK_PORT`. It invokes
-`backup.sh` once per `SCHEDULE`.
+`backup.sh` once per `SCHEDULE`. With the REST API or metrics on,
+`backupgram-api` is PID 1 and runs go-cron as a child; it serves `/healthz`,
+plus `/metrics` when `METRICS_ENABLE=TRUE` and the token-protected REST routes
+when `REST_API_ENABLE=TRUE` (see [MONITORING.md](MONITORING.md) and
+[REST_API.md](REST_API.md)).
+
+`backup.sh` sources its helpers from `scripts/lib/`: `layout.sh` (folders, links,
+retention), `dump.sh` (format detection, streaming dump, verification),
+`discover.sh` (database discovery), `rls_guard.sh` (row-level security checks) and
+`metrics.sh` (Prometheus output).
 
 **`env.sh` is dual-purpose and central:**
 
@@ -90,40 +107,65 @@ schedule and serves the healthcheck on `HEALTHCHECK_PORT`. It invokes
 
 ```mermaid
 flowchart TD
-    start([go-cron fires]) --> lock{flock<br/>already running?}
-    lock -->|yes| skip([skip run])
-    lock -->|no| source[source env.sh]
-    source --> pre[run pre-backup hook]
+    start([go-cron fires]) --> lock{"BACKUP_DIR/.lock<br/>held by another run?"}
+    lock -->|yes| busy(["exit 75<br/>nothing is touched"])
+    lock -->|no| setup["setup<br/>BACKUP_GID, remove stale .part files"]
+    setup --> pre[run pre-backup hook]
     pre --> ready{pg_isready?}
-    ready -->|no| err[fire error hook + alert]
-    ready -->|yes| disk{disk space OK?}
-    disk -->|no| err
-    disk -->|yes| dump["dump<br/>pg_dump per DB<br/>(or pg_dumpall if cluster)"]
-    dump --> verify[verify_backup]
-    verify --> enc{BACKUP_ENCRYPTION_KEY?}
-    enc -->|yes| gpg["encrypt_file (GPG AES-256)"]
-    enc -->|no| rotate
-    gpg --> rotate[rotate into daily/weekly/monthly]
-    rotate --> send[send to Telegram]
-    send --> prune[retention cleanup]
-    prune --> status["write /tmp/backup_status"]
-    status --> summary[summary Telegram message]
+    ready -->|no| abort
+    ready -->|yes| disc["discovery<br/>include, exclude, CONNECT check"]
+    disc -->|"nothing left"| abort
+    disc --> disk{disk space OK?}
+    disk -->|no| abort
+    disk -->|yes| guard
+
+    subgraph perdb["per database"]
+        guard["RLS guard<br/>(BACKUP_RLS_GUARD)"] --> dump["dump into last/.name.part<br/>(piped through GPG when encrypted)"]
+        dump --> accept["size check + full verify"]
+        accept --> rename["rename into last/,<br/>link into daily / weekly / monthly"]
+        rename --> send[send to Telegram]
+        guard -->|fail| keep
+        dump -->|fail| keep
+        accept -->|fail| keep["remove .part,<br/>keep the previous dump,<br/>count the database as failed"]
+    end
+
+    send --> dropped["dropped databases leave last/<br/>(snapshot layout)"]
+    keep --> dropped
+    dropped --> retention["retention<br/>(skipped if nothing was backed up)"]
+    retention --> metrics[write metrics]
+    metrics --> status["write /tmp/backup_status"]
+    status --> summary[summary + Telegram message]
     summary --> post[run post-backup hook]
-    post --> done([done])
-    err --> done
+    post --> result{any database failed?}
+    result -->|no| ok([exit 0])
+    result -->|yes| fail([exit 1])
+    abort["abort: write metrics<br/>(run marked failed)"] --> fail
 ```
 
 `backup.sh` starts with `set -Eeo pipefail` and traps `ERR` to fire the `error`
-hook.
+hook. A failing database does not stop the run: the others still dump, and the
+run ends with exit code `1`. The lock is `${BACKUP_DIR}/.lock`, so containers
+sharing a backup volume also run one at a time; a busy run prints one line and
+exits `75` without changing anything. Every file of a run carries the run's start
+time.
+
+> Commands whose failure `backup.sh` handles itself run inside `if` / `||`
+> conditions, where `set -e` does not apply, so each command in those pipelines is
+> checked explicitly.
 
 ---
 
 ## Rotation model
 
-Each run writes a timestamped file into `last/`, then **hard-links** it into
+Each run writes each database's dump into `last/` (first as a hidden
+`.<name>.part` file, renamed into place once verified), then **hard-links** it into
 `daily/`, `weekly/`, and `monthly/`. The hard link means the same inode is
 shared — no extra disk is consumed. `*-latest` pointers are created per slot
-(symlink / hardlink / none via `BACKUP_LATEST_TYPE`).
+(symlink / hardlink / none via `BACKUP_LATEST_TYPE`). `BACKUP_LAYOUT` picks how the
+other folders are named and filled.
+
+**`period`** (default) — one file per day, ISO week and month, replaced by each run
+of that period:
 
 ```
 /backups/
@@ -138,9 +180,31 @@ shared — no extra disk is consumed. `*-latest` pointers are created per slot
     mydb-202604.sql.gz                # latest backup of the month
 ```
 
-Retention cleanup runs after each successful backup; each folder is pruned
-independently using its own `BACKUP_KEEP_*` threshold (see
-[CONFIGURATION.md → Retention Math](CONFIGURATION.md#retention-math)).
+**`snapshot`** — the same timestamped name in every folder; `weekly/` only gets
+the Sunday run and `monthly/` the run on the 1st; `last/` holds exactly the newest
+dump of each database that still exists:
+
+```
+/backups/
+  last/
+    mydb-20260416-020000.sql.gz       # newest dump per existing database
+  daily/
+    mydb-20260416-020000.sql.gz       # every run  (hard link)
+  weekly/
+    mydb-20260412-020000.sql.gz       # the Sunday run
+  monthly/
+    mydb-20260401-020000.sql.gz       # the run on the 1st
+```
+
+A dropped database's dump and its `-latest` entry leave `last/`; its
+`daily/`, `weekly/` and `monthly/` copies stay until retention removes them.
+
+Retention cleanup runs once per run, after the loop over every database, and
+covers every backup file of each folder, not just this run's databases; each folder
+is pruned independently using its own `BACKUP_KEEP_*` threshold (see
+[CONFIGURATION.md → Layouts](CONFIGURATION.md#layouts) and
+[Retention Math](CONFIGURATION.md#retention-math)). It is skipped when no database
+was backed up in the run.
 
 > Directory-format dumps (`-Fd`) cannot be hard-linked, so they are `cp -r`'d and
 > `tar.gz`'d for Telegram. Because of hard links + symlinks, `BACKUP_DIR` **must**
@@ -150,16 +214,27 @@ independently using its own `BACKUP_KEEP_*` threshold (see
 
 ## Format branches
 
-The same format-specific logic appears in both `backup.sh` (verify, encryption
-suffix) and `restore.sh` (decrypt → un-tar → dispatch by extension). Keep them
-in sync.
+The same format-specific logic appears in both `backup.sh` (`scripts/lib/dump.sh`:
+dump, verification, encryption suffix) and `restore.sh` (decrypt → un-tar →
+dispatch by extension). Keep them in sync. The format is read once from
+`POSTGRES_EXTRA_OPTS` (`-Fc`, `-Ft`, `-Fd`, `-Z…`).
 
-| Format | Produced by | Verified via | Restored via |
+Encryption streams: `pg_dump` (or `pg_dumpall | gzip`) is piped into `gpg`, which
+writes the `.part` file, so no unencrypted dump touches the disk. Every stage of each
+pipe must succeed for the dump to be accepted.
+
+| Format | Produced by | Verified by (before the rename) | Restored via |
 |---|---|---|---|
-| gzip SQL (`.sql.gz`) | default `pg_dump` | magic-byte check (`1f8b`); `-Z0` uncompressed tolerated | `psql` / `pg_restore` |
-| directory (`-Fd`) | `pg_dump -Fd` | `pg_restore --list` | `pg_restore` |
-| cluster | `pg_dumpall` (`POSTGRES_CLUSTER=TRUE`) | **skipped** (plain SQL) | `psql -d postgres` |
-| GPG (`.gpg`) | wraps any of the above | after decrypt | decrypt, then dispatch |
+| gzip SQL (`.sql.gz`) | `pg_dump` (default `-Z1`) | `gunzip -c >/dev/null` | `gunzip \| psql` |
+| plain SQL, uncompressed (`-Z0`) or another codec | `pg_dump` | size check only (encrypted: decrypt to `/dev/null`) | `psql` |
+| custom (`-Fc`) or tar (`-Ft`) | `pg_dump -Fc` / `-Ft` | `pg_restore -f /dev/null` (encrypted: `gpg --decrypt \| pg_restore -f /dev/null`) | `pg_restore` |
+| directory (`-Fd`) | `pg_dump -Fd` into a `.part` directory | `pg_restore -f /dev/null` | `pg_restore` |
+| cluster | `pg_dumpall \| gzip` (`POSTGRES_CLUSTER=TRUE`) | `gunzip -c >/dev/null` | `psql -d postgres` |
+| GPG (`.gpg`) | wraps any of the above except directory | through the decryption pipe | streamed into the restore; a tar-archived directory decrypts to a temp file |
+
+Directory-format dumps are never encrypted. A wrong key or a damaged encrypted
+file makes `restore` exit `1` with
+`❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file).`
 
 ---
 

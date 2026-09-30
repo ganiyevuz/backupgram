@@ -3,16 +3,20 @@
 > A Docker image (Bash scripts plus two small Go binaries) that runs automated PostgreSQL backups on a cron
 > schedule, with rotating retention, Telegram delivery (Bot API + MTProto),
 > optional GPG encryption, webhooks, multi-chat fan-out, auto-discovery of
-> databases, an optional HTTP REST control API, and built-in restore tooling.
+> databases, an optional HTTP REST control API, Prometheus metrics with a Grafana
+> dashboard, and built-in restore tooling.
 > Published as `ganiyevuz/backupgram:<pg-version>[-alpine]`.
 
 ## Core Files
-- [scripts/init.sh]: ENTRYPOINT — validates config, then execs backupgram-api (REST_API_ENABLE=TRUE, which supervises go-cron) or go-cron directly with SCHEDULE
+- [scripts/init.sh]: ENTRYPOINT — validates config, then execs backupgram-api (REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE; it supervises go-cron) or go-cron directly with SCHEDULE
 - [scripts/env.sh]: dual-purpose config — sourced for validation/var resolution, executed standalone at startup
-- [scripts/backup.sh]: the backup cycle — dump, verify, encrypt, rotate, send to Telegram, prune
+- [scripts/backup.sh]: the backup cycle — lock, then per database: dump into a .part file (streamed through GPG when encrypted), verify, rename, link, send to Telegram; then retention, metrics, summary; exits 0 / 1 / 75
+- [scripts/lib/]: helpers sourced by backup.sh — layout.sh (folders, links, retention), dump.sh (format detection, streaming dump, verification), discover.sh (database discovery), rls_guard.sh (row-level security checks), metrics.sh (Prometheus output)
 - [scripts/restore.sh]: restore tooling — interactive, by file, cross-database, or --from-telegram
 - [tg-upload/]: Go binary (gotd/td) for MTProto upload/download of files up to 2 GB
 - [rest-api/]: Go module (net/http) for the optional REST control API; layered packages (httpx/config/backups/jobs/handlers/server/supervisor)
+- [monitoring/]: Grafana dashboard (grafana/backupgram.json) and Prometheus alert rules (prometheus/backupgram-alerts.yml)
+- [tests/]: scenario runner (scenarios.sh), local Docker harness (run-local.sh), Pharmakon-shaped PostgreSQL fixture (pharmakon/fixture.sh)
 - [hooks/]: run-parts hooks (pre-backup | post-backup | error); 00-webhook implements WEBHOOK_* vars
 - [docker/debian.Dockerfile, docker/alpine.Dockerfile]: image definitions; kept in lockstep (identical ENV + symlinks)
 - [generate-docker-bake.sh]: source of truth for docker-bake.hcl (generated — do not hand-edit)
@@ -25,6 +29,7 @@
 - [docs/CONFIGURATION.md]: every environment variable, Docker secrets, retention math
 - [docs/CLI.md]: backup, restore, list, status, help with example output
 - [docs/ARCHITECTURE.md]: runtime chain, backup cycle, rotation model, format branches (C4 + mermaid)
+- [docs/MONITORING.md]: Prometheus metrics (textfile collector or GET /metrics), Grafana dashboard, alert rules
 - [docs/REST_API.md]: optional HTTP control surface — endpoints, bearer auth, runtime config editing
 - [docs/BUILD.md]: multi-arch build with QEMU + buildx
 - [docs/LARGE_FILES.md]: MTProto large-file (>50 MB, up to 2 GB) upload route
@@ -32,11 +37,17 @@
 
 ## Key Concepts
 - Rotation model: each run writes to last/, then hard-links into daily/weekly/monthly/ (same inode, no extra disk); requires a POSIX filesystem with hardlink+symlink support
-- Format branches: gzip SQL (.sql.gz, default), directory (-Fd), cluster (pg_dumpall), each optionally GPG-wrapped (.gpg) — kept in sync across backup.sh and restore.sh
+- Layouts: BACKUP_LAYOUT=period (default: one file per day/week/month) or snapshot (the run's timestamped name in every folder, weekly on Sundays, monthly on the 1st; last/ holds the newest dump of each existing database, and a dropped database's dump and -latest entry leave last/)
+- Dump pipeline: each dump goes to last/.<name>.part, is size-checked and fully verified (through the decryption pipe when encrypted), and only then renamed into place; a failure keeps the previous dump. Retention runs once after the loop over every file, and is skipped when no database was backed up
+- Encryption: pg_dump is piped into GPG (nothing unencrypted on disk); the key goes through a temp passphrase file, never a command line; directory-format (-Fd) dumps are never encrypted; restore streams the decryption and exits 1 on a wrong key
+- Exit codes: backup exits 0 (all databases dumped), 1 (a database failed, the others still ran, or the run aborted), 75 (another run holds ${BACKUP_DIR}/.lock); every file of a run carries the run's start time
+- Row-level security guard: BACKUP_RLS_GUARD=TRUE checks each database before its dump (tables the login cannot read in full, or a restrictive policy limiting it) and fails the database, keeping its previous dump
+- Metrics: METRICS_TEXTFILE_DIR (node-exporter textfile) and/or METRICS_ENABLE (GET /metrics on REST_API_PORT, unauthenticated; metrics-only mode without REST_API_ENABLE); keep the port internal
+- Format branches: gzip SQL (.sql.gz, default), custom (-Fc), tar, directory (-Fd), cluster (pg_dumpall), each optionally GPG-wrapped (.gpg) except directory — kept in sync across backup.sh and restore.sh
 - Telegram transport: TELEGRAM_UPLOAD_METHOD = smart | botapi | mtproto; 50 MB Bot API limit enforced only against the official api.telegram.org
 - Multi-chat fan-out: comma-separated TELEGRAM_CHAT_ID; uploaded once, file_id reused per chat
 - Restore by message id: backups embed a 🔖 Restore ID in their caption; restore --from-telegram fetches and restores it
 - Secrets precedence: *_FILE (Docker secrets) takes precedence over the plain env var
 - Scheduling/health: go-cron (prodrigestivill/go-cron) owns SCHEDULE and serves the healthcheck on HEALTHCHECK_PORT
-- Auto-discover: POSTGRES_DB_AUTODISCOVER backs up every non-template DB (minus postgres and POSTGRES_DB_EXCLUDE); POSTGRES_DB optional; ignored in cluster mode; an empty discovered set aborts the run
+- Auto-discover: POSTGRES_DB_AUTODISCOVER backs up every non-template DB (filtered by POSTGRES_DB_INCLUDE globs, minus postgres and POSTGRES_DB_EXCLUDE; databases the login may not CONNECT to are skipped and logged); POSTGRES_DB optional; ignored in cluster mode; an empty discovered set aborts the run
 - REST API: optional (REST_API_ENABLE) HTTP control surface behind a bearer token (REST_API_TOKEN); backupgram-api becomes PID 1 and supervises go-cron; long ops run as async jobs (202 + GET /jobs/{id}); listens on REST_API_PORT (8081)
