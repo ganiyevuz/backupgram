@@ -59,9 +59,12 @@ expect_no_out() {
 }
 
 # expect_count DIR GLOB N — exactly N entries of DIR match GLOB (dot files included only if GLOB starts with a dot).
+# A DIR that does not exist counts as 0 entries.
 expect_count() {
-  local n
-  n="$(find "$1" -maxdepth 1 -mindepth 1 -name "$2" 2>/dev/null | wc -l | tr -d ' ')"
+  local n=0
+  if [ -d "$1" ]; then
+    n="$({ find "$1" -maxdepth 1 -mindepth 1 -name "$2" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  fi
   [ "${n}" = "$3" ] || fail "$1/$2: ${n} entries, expected $3"
 }
 
