@@ -2,8 +2,11 @@
 # finished dump into daily/weekly/monthly, and retention. Uses BACKUP_DIR, the
 # run variables (STAMP, RUN_*) and the KEEP_* thresholds computed in env.sh.
 
+# Creates the folders and removes .part files a killed run left behind. Runs only
+# with the lock held, so no live run's .part can be removed.
 prepare_backup_dir() {
   mkdir -p "${BACKUP_DIR}/last" "${BACKUP_DIR}/daily" "${BACKUP_DIR}/weekly" "${BACKUP_DIR}/monthly"
+  find "${BACKUP_DIR}/last" -maxdepth 1 -mindepth 1 -name '.*.part' -exec rm -rf '{}' +
 }
 
 # Puts SRC at DEST: a hard link for a file (replacing DEST), a fresh copy for a

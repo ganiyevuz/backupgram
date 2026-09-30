@@ -185,6 +185,16 @@ else
   echo "⚠️ Telegram credentials not provided. Telegram notifications disabled."
 fi
 
+# Unsigned integer settings
+# shellcheck disable=SC2043  # a list on purpose: more integer settings join it
+for _uint_var in BACKUP_MIN_BYTES; do
+  if [ -n "${!_uint_var}" ] && ! [[ "${!_uint_var}" =~ ^[0-9]+$ ]]; then
+    echo "❌ ${_uint_var} must be a whole number of bytes (got '${!_uint_var}')." >&2
+    exit 1
+  fi
+done
+unset _uint_var
+
 # Encryption (optional)
 if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
   if command -v gpg >/dev/null 2>&1; then

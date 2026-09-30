@@ -133,6 +133,24 @@ jobs:
       - name: "Scenario: period layout + retention over every file"
         run: bash tests/scenarios.sh period_layout_retention
 
+      - name: "Scenario: encrypted custom format, tricky passphrase"
+        run: bash tests/scenarios.sh encrypted_custom
+
+      - name: "Scenario: too-small dump keeps the previous one"
+        run: bash tests/scenarios.sh min_bytes_keeps_previous
+
+      - name: "Scenario: stale .part removed"
+        run: bash tests/scenarios.sh stale_part_removed
+
+      - name: "Scenario: verification rejects garbage"
+        run: bash tests/scenarios.sh verify_rejects_garbage
+
+      - name: "Scenario: every format still works"
+        run: bash tests/scenarios.sh formats_still_work
+
+      - name: "Scenario: no retention when every database failed"
+        run: bash tests/scenarios.sh retention_skipped_when_nothing_succeeded
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

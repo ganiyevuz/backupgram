@@ -16,6 +16,8 @@ fi
 source "${SCRIPT_DIR}/env.sh"
 # shellcheck source=scripts/lib/layout.sh
 source "${SCRIPT_DIR}/lib/layout.sh"
+# shellcheck source=scripts/lib/dump.sh
+source "${SCRIPT_DIR}/lib/dump.sh"
 
 # One run at a time, across every container that shares BACKUP_DIR. A second run
 # exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
@@ -32,6 +34,8 @@ read -r STAMP RUN_DATE RUN_WEEK RUN_MONTH RUN_WEEKDAY RUN_DAY <<< "$(date '+%Y%m
 BACKUP_START_TIME=$(date +%s)
 
 prepare_backup_dir
+prepare_keyfile
+detect_dump_format
 
 # Pre-backup hook
 if [ -d "${HOOKS_DIR}" ]; then
@@ -92,12 +96,15 @@ if [ -n "${AVAILABLE_MB}" ] && [ "${AVAILABLE_MB}" -lt "${BACKUP_MIN_DISK_SPACE}
 fi
 echo "✅ Disk space OK (${AVAILABLE_MB}MB available)."
 
-# Build exclude-table args if POSTGRES_EXCLUDE_TABLES is set
+# Build exclude-table args if POSTGRES_EXCLUDE_TABLES is set (no pathname expansion)
 EXCLUDE_ARGS=""
 if [ -n "${POSTGRES_EXCLUDE_TABLES}" ]; then
+  set -f
+  # shellcheck disable=SC2086
   for TABLE in ${POSTGRES_EXCLUDE_TABLES//,/ }; do
     EXCLUDE_ARGS="${EXCLUDE_ARGS} --exclude-table=${TABLE}"
   done
+  set +f
   echo "Excluding tables: ${POSTGRES_EXCLUDE_TABLES}"
 fi
 
@@ -107,86 +114,6 @@ TELEGRAM_NOTIFY_ON="${TELEGRAM_NOTIFY_ON:-all}"
 # Telegram file size limit (50MB in bytes) and the bot MTProto ceiling (2GB)
 TELEGRAM_MAX_SIZE=52428800
 TELEGRAM_MTPROTO_MAX_SIZE=2147483648
-
-# Get human-readable size of a file or directory
-get_size() {
-  if [ -d "$1" ]; then
-    du -sh "$1" 2>/dev/null | cut -f1
-  elif [ -f "$1" ]; then
-    du -h "$1" 2>/dev/null | cut -f1
-  else
-    echo "0"
-  fi
-}
-
-# Get raw byte size (POSIX-compatible, works on Alpine/BusyBox)
-get_size_bytes() {
-  if [ -d "$1" ]; then
-    local kb
-    kb=$(du -s "$1" 2>/dev/null | cut -f1)
-    echo $((kb * 1024))
-  elif [ -f "$1" ]; then
-    wc -c < "$1" 2>/dev/null
-  else
-    echo "0"
-  fi
-}
-
-# Encrypt a file with GPG if encryption is enabled
-encrypt_file() {
-  local file="$1"
-  if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
-    echo "🔒 Encrypting ${file}..." >&2
-    gpg --symmetric --batch --yes --passphrase "${BACKUP_ENCRYPTION_KEY}" \
-      --cipher-algo AES256 -o "${file}.gpg" "${file}"
-    rm -f "${file}"
-    echo "${file}.gpg"
-  else
-    echo "${file}"
-  fi
-}
-
-# Verify backup integrity using pg_restore
-verify_backup() {
-  local file="$1"
-  local db="$2"
-
-  # Skip verification for cluster dumps (pg_dumpall produces SQL, not archive format)
-  if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
-    return 0
-  fi
-
-  # Skip for directory format (pg_restore --list works differently)
-  if [ -d "${file}" ]; then
-    if pg_restore --list "${file}" > /dev/null 2>&1; then
-      echo "✅ Backup verification passed for ${db}."
-      return 0
-    else
-      echo "⚠️ Backup verification failed for ${db}. File may be corrupted." >&2
-      return 1
-    fi
-  fi
-
-  # For gzip files, verify the archive is valid
-  # Check magic bytes (1f 8b) to confirm it's actually gzip, not just a .gz extension
-  if [[ "${file}" == *.gz ]]; then
-    local magic
-    magic=$(head -c 2 "${file}" 2>/dev/null | od -A n -t x1 | tr -d ' ')
-    if [ "${magic}" = "1f8b" ]; then
-      if gzip -t "${file}" 2>/dev/null; then
-        echo "✅ Backup integrity check passed for ${db} (valid gzip)."
-      else
-        echo "⚠️ Backup integrity check failed for ${db}. Gzip file is corrupted." >&2
-        return 1
-      fi
-    else
-      echo "✅ Backup created for ${db} (uncompressed, -Z0 mode)."
-    fi
-    return 0
-  fi
-
-  return 0
-}
 
 # Send the prepared upload file to Telegram via the MTProto binary (tg-upload).
 # Args: <upload_file> <caption> <original_file>. Delivery failure is non-fatal;
@@ -353,121 +280,74 @@ BACKUP_SUCCESS=0
 BACKUP_FAILED=0
 FAILED_DBS=""
 
-# Handle cluster mode: pg_dumpall dumps ALL databases at once
-if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
-  DB="cluster"
-  LAST_FILENAME="${DB}-${STAMP}${BACKUP_SUFFIX}"
-  DAILY_FILENAME="${DB}-${RUN_DATE}${BACKUP_SUFFIX}"
-  WEEKLY_FILENAME="${DB}-${RUN_WEEK}${BACKUP_SUFFIX}"
-  MONTHLY_FILENAME="${DB}-${RUN_MONTH}${BACKUP_SUFFIX}"
-  FILE="${BACKUP_DIR}/last/${LAST_FILENAME}"
-  DFILE="${BACKUP_DIR}/daily/${DAILY_FILENAME}"
-  WFILE="${BACKUP_DIR}/weekly/${WEEKLY_FILENAME}"
-  MFILE="${BACKUP_DIR}/monthly/${MONTHLY_FILENAME}"
+# One database (or the cluster): dump to last/.<name>.part, accept it only if the
+# dump succeeded, is big enough and reads back in full, then rename it into place
+# and link it into the other folders. Any failure keeps the previous dump.
+backup_database() {
+  local db="$1" name part file
+  name="$(final_name "${db}")"
+  part="${BACKUP_DIR}/last/.${name}.part"
+  file="${BACKUP_DIR}/last/${name}"
 
-  echo "Creating cluster dump from ${POSTGRES_HOST}..."
-  # shellcheck disable=SC2086
-  if pg_dumpall ${POSTGRES_EXTRA_OPTS} | gzip > "${FILE}"; then
-    POSTGRES_DBS="cluster"
-  else
-    echo "❌ Error: pg_dumpall failed. Aborting." >&2
-    BACKUP_FAILED=1
-    FAILED_DBS="cluster"
-    POSTGRES_DBS=""
+  echo "Creating dump of ${db} from ${POSTGRES_HOST}..."
+  if ! dump_to_part "${db}" "${part}"; then
+    echo "❌ ${db}: dump failed. Previous dump kept." >&2
+    rm -rf "${part}"
+    return 1
   fi
+  if ! check_part_size "${db}" "${part}"; then
+    rm -rf "${part}"
+    return 1
+  fi
+  if ! verify_part "${part}"; then
+    echo "❌ ${db}: verification failed. Previous dump kept." >&2
+    rm -rf "${part}"
+    return 1
+  fi
+  if ! mv "${part}" "${file}"; then
+    echo "❌ ${db}: could not move the dump into last/. Previous dump kept." >&2
+    rm -rf "${part}"
+    return 1
+  fi
+  if ! link_into_slots "${db}" "${file}"; then
+    echo "❌ ${db}: could not link the dump into daily/weekly/monthly." >&2
+    return 1
+  fi
+  echo "✅ Backup created: ${file} ($(get_size "${file}"), $(get_size_bytes "${file}") bytes, $(( $(date +%s) - DB_START_TIME ))s)"
+
+  # Send backup to Telegram (respects TELEGRAM_NOTIFY_ON); delivery never fails the backup
+  if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
+    if [ "${TELEGRAM_NOTIFY_ON}" = "all" ] || [ "${TELEGRAM_NOTIFY_ON}" = "success" ]; then
+      send_to_telegram "${file}" "${db}" || true
+    fi
+  fi
+}
+
+if [ "${POSTGRES_CLUSTER}" = "TRUE" ]; then
+  POSTGRES_DBS="cluster"
 fi
 
-# Loop through all databases (or single "cluster" entry)
-for DB in ${POSTGRES_DBS}; do
+set -f
+# shellcheck disable=SC2206
+DBS=(${POSTGRES_DBS})
+set +f
+for DB in "${DBS[@]}"; do
   DB_START_TIME=$(date +%s)
-
-  if [ "${POSTGRES_CLUSTER}" != "TRUE" ]; then
-    LAST_FILENAME="${DB}-${STAMP}${BACKUP_SUFFIX}"
-    DAILY_FILENAME="${DB}-${RUN_DATE}${BACKUP_SUFFIX}"
-    WEEKLY_FILENAME="${DB}-${RUN_WEEK}${BACKUP_SUFFIX}"
-    MONTHLY_FILENAME="${DB}-${RUN_MONTH}${BACKUP_SUFFIX}"
-    FILE="${BACKUP_DIR}/last/${LAST_FILENAME}"
-    DFILE="${BACKUP_DIR}/daily/${DAILY_FILENAME}"
-    WFILE="${BACKUP_DIR}/weekly/${WEEKLY_FILENAME}"
-    MFILE="${BACKUP_DIR}/monthly/${MONTHLY_FILENAME}"
-
-    echo "Creating dump of ${DB} database from ${POSTGRES_HOST}..."
-
-    if [[ "${POSTGRES_EXTRA_OPTS}" == *"-Fd"* ]]; then
-      echo "📂 Directory format (-Fd) detected. Removing compression option..."
-      PG_DUMP_OPTS=$(echo "${POSTGRES_EXTRA_OPTS}" | sed 's/-Z[0-9]*//g' | xargs)
-      # shellcheck disable=SC2086
-      if ! pg_dump -d "${DB}" -f "${FILE}" ${PG_DUMP_OPTS} ${EXCLUDE_ARGS}; then
-        echo "❌ Error: pg_dump failed for ${DB}. Skipping." >&2
-        BACKUP_FAILED=$((BACKUP_FAILED + 1))
-        FAILED_DBS="${FAILED_DBS} ${DB}"
-        continue
-      fi
-    else
-      # shellcheck disable=SC2086
-      if ! pg_dump -d "${DB}" -f "${FILE}" ${POSTGRES_EXTRA_OPTS} ${EXCLUDE_ARGS}; then
-        echo "❌ Error: pg_dump failed for ${DB}. Skipping." >&2
-        BACKUP_FAILED=$((BACKUP_FAILED + 1))
-        FAILED_DBS="${FAILED_DBS} ${DB}"
-        continue
-      fi
-    fi
-  fi
-
-  # Check if the backup file or directory exists and is not empty
-  if [ -s "${FILE}" ] || [ -d "${FILE}" ]; then
-    # Verify backup integrity
-    if ! verify_backup "${FILE}" "${DB}"; then
-      BACKUP_FAILED=$((BACKUP_FAILED + 1))
-      FAILED_DBS="${FAILED_DBS} ${DB}"
-      continue
-    fi
-
-    # Encrypt backup if enabled
-    if [ -n "${BACKUP_ENCRYPTION_KEY}" ] && [ ! -d "${FILE}" ]; then
-      FILE=$(encrypt_file "${FILE}")
-      LAST_FILENAME="$(basename "${FILE}")"
-      # Update rotation filenames with .gpg suffix
-      DAILY_FILENAME="${DAILY_FILENAME}.gpg"
-      WEEKLY_FILENAME="${WEEKLY_FILENAME}.gpg"
-      MONTHLY_FILENAME="${MONTHLY_FILENAME}.gpg"
-      DFILE="${BACKUP_DIR}/daily/${DAILY_FILENAME}"
-      WFILE="${BACKUP_DIR}/weekly/${WEEKLY_FILENAME}"
-      MFILE="${BACKUP_DIR}/monthly/${MONTHLY_FILENAME}"
-    fi
-
-    DB_DURATION=$(( $(date +%s) - DB_START_TIME ))
-    BACKUP_SIZE=$(get_size "${FILE}")
-    echo "✅ Backup created: ${FILE} (${BACKUP_SIZE}, ${DB_DURATION}s)"
-
-    # Link into daily/weekly/monthly (and -latest) per the layout
-    if ! link_into_slots "${DB}" "${FILE}"; then
-      echo "❌ ${DB}: could not link the dump into daily/weekly/monthly." >&2
-      BACKUP_FAILED=$((BACKUP_FAILED + 1))
-      FAILED_DBS="${FAILED_DBS} ${DB}"
-      continue
-    fi
+  if backup_database "${DB}"; then
     BACKUP_SUCCESS=$((BACKUP_SUCCESS + 1))
-
-    # Send backup to Telegram (respects TELEGRAM_NOTIFY_ON)
-    if [ -n "${TELEGRAM_BOT_TOKEN}" ] && [ -n "${TELEGRAM_CHAT_ID}" ]; then
-      if [ "${TELEGRAM_NOTIFY_ON}" = "all" ] || [ "${TELEGRAM_NOTIFY_ON}" = "success" ]; then
-        send_to_telegram "${FILE}" "${DB}"
-      fi
-    fi
   else
-    echo "❌ Error: Backup file ${FILE} is empty or missing. Skipping." >&2
     BACKUP_FAILED=$((BACKUP_FAILED + 1))
     FAILED_DBS="${FAILED_DBS} ${DB}"
   fi
 done
 
-# Retention, once, over every file (see apply_retention)
-CLEANUP_SUFFIX="${BACKUP_SUFFIX}"
-if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
-  CLEANUP_SUFFIX="${BACKUP_SUFFIX}.gpg"
+# Retention, once, over every file (see apply_retention) — skipped when nothing was
+# backed up, so a run failing for every database never erodes the last good copies.
+if [ "${BACKUP_SUCCESS}" -gt 0 ]; then
+  apply_retention "$(final_suffix)"
+else
+  echo "⚠️ No database was backed up this run; retention skipped." >&2
 fi
-apply_retention "${CLEANUP_SUFFIX}"
 
 # Backup summary
 BACKUP_END_TIME=$(date +%s)

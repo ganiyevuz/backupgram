@@ -78,6 +78,105 @@ scenario_period_layout_retention() {
   [ -L "${BACKUP_DIR}/daily/gone-latest.sql.gz" ] || fail "retention deleted a -latest link"
 }
 
+# A passphrase with spaces, quotes, $ and a backslash must round-trip.
+# shellcheck disable=SC2016  # the single quotes are the point: nothing may expand
+TRICKY_KEY='p@ss w0rd $HOME "q" '\''s'\'' \n end'
+
+scenario_encrypted_custom() {
+  fresh_backup_dir
+  local file keyfile
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" run_backup
+  expect_rc 0 "encrypted custom format"
+  file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.dump.gpg')"
+  [ -z "$(find "${BACKUP_DIR}" -name '*.dump' -print -quit)" ] || fail "a clear-text .dump exists"
+  expect_no_out "${TRICKY_KEY}"
+  keyfile="$(mktemp)"
+  printf '%s' "${TRICKY_KEY}" > "${keyfile}"
+  # `cat` drains what `pg_restore --list` leaves unread: a dump larger than the pipe buffer
+  # would otherwise make gpg die of SIGPIPE, which pipefail turns into a failure.
+  gpg --batch --quiet --no-symkey-cache --decrypt --passphrase-file "${keyfile}" "${file}" | { pg_restore --list >/dev/null && cat >/dev/null; } \
+    || fail "the dump does not decrypt with the key into a readable archive"
+  rm -f "${keyfile}"
+}
+
+scenario_min_bytes_keeps_previous() {
+  fresh_backup_dir
+  local first before
+  run_backup
+  expect_rc 0 "first run"
+  first="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz')"
+  before="$(inode "${first}")"
+  sleep 1
+  BACKUP_MIN_BYTES=999999999 run_backup
+  expect_rc 1 "dump below BACKUP_MIN_BYTES"
+  expect_out "below BACKUP_MIN_BYTES=999999999. Previous dump kept."
+  expect_count "${BACKUP_DIR}/last" '.*.part' 0
+  [ "$(inode "${first}")" = "${before}" ] || fail "the previous dump was replaced"
+  expect_count "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz' 1
+}
+
+scenario_stale_part_removed() {
+  fresh_backup_dir
+  mkdir -p "${BACKUP_DIR}/last/.database-20200101-000000.dump.part"
+  touch "${BACKUP_DIR}/last/.database-20200101-000000.sql.gz.part"
+  run_backup
+  expect_rc 0 "run after a killed one"
+  expect_count "${BACKUP_DIR}/last" '.*.part' 0
+}
+
+# A pg_dump that "succeeds" with garbage must never replace a good dump.
+scenario_verify_rejects_garbage() {
+  fresh_backup_dir
+  local fake
+  fake="$(mktemp -d)"
+  # Honours -f like the real pg_dump, so the garbage lands where the pipeline expects the dump.
+  cat > "${fake}/pg_dump" <<'SH'
+#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  [ "$1" = "-f" ] && out="$2"
+  shift
+done
+if [ -n "${out}" ]; then echo "this is not an archive" > "${out}"; else echo "this is not an archive"; fi
+SH
+  chmod +x "${fake}/pg_dump"
+  PATH="${fake}:${PATH}" POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" run_backup
+  expect_rc 1 "custom format, garbage"
+  expect_out "database: verification failed. Previous dump kept."
+  PATH="${fake}:${PATH}" POSTGRES_EXTRA_OPTS="-Z1" run_backup
+  expect_rc 1 "gzip plain, garbage"
+  PATH="${fake}:${PATH}" POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 1 "encrypted custom format, garbage"
+  expect_count "${BACKUP_DIR}/last" 'database-*' 0
+  expect_count "${BACKUP_DIR}/last" '.*.part' 0
+  rm -rf "${fake}"
+}
+
+# A run where every database fails must not prune: the old copies are the last good ones.
+scenario_retention_skipped_when_nothing_succeeded() {
+  fresh_backup_dir
+  mkdir -p "${BACKUP_DIR}/daily"
+  touch -d '30 days ago' "${BACKUP_DIR}/daily/database-20200101.sql.gz"
+  POSTGRES_DB="no_such_db" run_backup
+  expect_rc 1 "every database failed"
+  expect_out "No database was backed up this run; retention skipped."
+  [ -e "${BACKUP_DIR}/daily/database-20200101.sql.gz" ] || fail "retention pruned while nothing was backed up"
+}
+
+scenario_formats_still_work() {
+  local opts
+  for opts in "-Z0" "-Z1" "-Z0 -Fd" "-Fc" "-Ft"; do
+    fresh_backup_dir
+    POSTGRES_EXTRA_OPTS="${opts}" BACKUP_ENCRYPTION_KEY="k" run_backup
+    expect_rc 0 "format '${opts}' (encrypted when not a directory)"
+    expect_count "${BACKUP_DIR}/daily" 'database-[0-9]*' 1
+  done
+  fresh_backup_dir
+  POSTGRES_CLUSTER="TRUE" POSTGRES_EXTRA_OPTS="" BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 0 "encrypted cluster dump"
+  only_file "${BACKUP_DIR}/last" 'cluster-[0-9]*.sql.gz.gpg' >/dev/null
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

@@ -28,7 +28,8 @@ services:
     working_dir: /work
     volumes:
       - ..:/work
-    tmpfs: ["/tmp"]
+    # exec: scenarios put stub executables (a fake pg_dump) under /tmp; Docker mounts tmpfs noexec by default.
+    tmpfs: ["/tmp:exec"]
     # The CI job's environment (.github/workflows/ci.yml, test-script), pointed at the db service.
     environment:
       TZ: Asia/Dubai
