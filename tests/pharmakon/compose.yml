@@ -1,0 +1,73 @@
+# Acceptance: the real image with Pharmakon's backup configuration (spec §12) against the
+# Pharmakon-shaped fixture. tests/pharmakon/acceptance.sh drives it.
+name: backupgram-pharmakon
+
+services:
+  db:
+    image: postgres:18-alpine
+    command: ["postgres", "-c", "timezone=Asia/Dubai"]
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: platform_admin
+      POSTGRES_PASSWORD: admin
+    tmpfs: ["/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform_admin -d postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  runner:
+    build:
+      context: ..
+      dockerfile: runner.Dockerfile
+    depends_on:
+      db: { condition: service_healthy }
+    working_dir: /work
+    environment:
+      TZ: Asia/Dubai
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      SU_USER: platform_admin
+      SU_PASSWORD: admin
+    volumes:
+      - ../..:/work
+      - backups:/backups
+      - textfile:/textfile
+
+  backup:
+    image: ${BACKUPGRAM_IMAGE:-backupgram-local:18-alpine}
+    pull_policy: never
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: svc_backup
+      POSTGRES_PASSWORD: svc_pw
+      POSTGRES_DB_AUTODISCOVER: "TRUE"
+      POSTGRES_DB_INCLUDE: "control,pharmacy_*"
+      POSTGRES_EXTRA_OPTS: "-Fc --enable-row-security --lock-wait-timeout=60s --exclude-schema=br*_before_*"
+      BACKUP_SUFFIX: ".dump"
+      BACKUP_LATEST_TYPE: "none"
+      BACKUP_LAYOUT: "snapshot"
+      BACKUP_RLS_GUARD: "TRUE"
+      BACKUP_MIN_BYTES: "1024"
+      BACKUP_GID: "1000"
+      BACKUP_ENCRYPTION_KEY: "pharmakon acceptance key"
+      SCHEDULE: "0 4 * * *"
+      TZ: Asia/Dubai
+      BACKUP_KEEP_DAYS: "7"
+      BACKUP_KEEP_WEEKS: "4"
+      BACKUP_KEEP_MONTHS: "3"
+      TELEGRAM_USE_DEFAULT_API: "FALSE"
+      METRICS_TEXTFILE_DIR: /textfile
+      PROJECT_NAME: platform-test
+    tmpfs: ["/tmp"]
+    volumes:
+      - backups:/backups
+      - textfile:/textfile
+      - ./10-manual-dir:/hooks/10-manual-dir:ro
+
+volumes:
+  backups:
+  textfile:

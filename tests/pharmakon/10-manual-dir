@@ -1,0 +1,5 @@
+#!/bin/sh
+# Pharmakon's backup-runner writes manual/ ("Back up now"); the backup container only
+# creates it, group-writable for BACKUP_GID, and never writes or prunes it.
+[ "$1" = "pre-backup" ] || exit 0
+mkdir -p /backups/manual && chgrp "${BACKUP_GID}" /backups/manual && chmod 2770 /backups/manual
