@@ -20,6 +20,8 @@ source "${SCRIPT_DIR}/lib/layout.sh"
 source "${SCRIPT_DIR}/lib/dump.sh"
 # shellcheck source=scripts/lib/discover.sh
 source "${SCRIPT_DIR}/lib/discover.sh"
+# shellcheck source=scripts/lib/rls_guard.sh
+source "${SCRIPT_DIR}/lib/rls_guard.sh"
 
 # One run at a time, across every container that shares BACKUP_DIR. A second run
 # exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
@@ -264,6 +266,10 @@ backup_database() {
   name="$(final_name "${db}")"
   part="${BACKUP_DIR}/last/.${name}.part"
   file="${BACKUP_DIR}/last/${name}"
+
+  if [ "${BACKUP_RLS_GUARD}" = "TRUE" ] && [ "${DUMP_FORMAT}" != "cluster" ]; then
+    rls_guard_check "${db}" || return 1
+  fi
 
   echo "Creating dump of ${db} from ${POSTGRES_HOST}..."
   if ! dump_to_part "${db}" "${part}"; then

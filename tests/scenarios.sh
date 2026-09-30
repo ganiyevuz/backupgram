@@ -212,6 +212,41 @@ scenario_pharmakon_discovery() {
   expect_out "Auto-discovered 2 database(s): control pharmacy_alpha"
 }
 
+scenario_pharmakon_rls_guard() {
+  load_pharmakon_fixture
+  fresh_backup_dir
+  pharmakon_env
+  export BACKUP_LAYOUT="period"
+  local beta
+  run_backup
+  expect_rc 0 "every RLS table has backup_reads_all"
+  beta="$(only_file "${BACKUP_DIR}/last" 'pharmacy_beta-[0-9]*.dump.gpg')"
+  # A table with row-level security and no full-read policy for svc_backup.
+  psql_su -d pharmacy_beta -c "SET ROLE svc_control_api" \
+    -c "CREATE TABLE public.riayati_gap (id text PRIMARY KEY, branch_no smallint NOT NULL)" \
+    -c "ALTER TABLE public.riayati_gap ENABLE ROW LEVEL SECURITY"
+  sleep 1
+  BACKUP_RLS_GUARD="FALSE" run_backup
+  expect_rc 0 "without the guard the short dump goes unnoticed"
+  sleep 1
+  run_backup
+  expect_rc 1 "an RLS table without backup_reads_all"
+  expect_out "❌ pharmacy_beta: row-level security without a full-read policy for svc_backup: public.riayati_gap. Previous dump kept."
+  expect_out "Backup created: ${BACKUP_DIR}/last/pharmacy_alpha-"
+  expect_count "${BACKUP_DIR}/last" 'pharmacy_beta-[0-9]*.dump.gpg' 2
+  # Give it the policy; then a restrictive policy that reaches svc_backup through PUBLIC.
+  psql_su -d pharmacy_beta -c "SET ROLE svc_control_api" \
+    -c "CREATE POLICY backup_reads_all ON public.riayati_gap FOR SELECT TO svc_backup USING (true)"
+  psql_su -d pharmacy_alpha -c "SET ROLE svc_control_api" \
+    -c "CREATE POLICY cut ON public.riayati_transaction AS RESTRICTIVE FOR SELECT TO PUBLIC USING (branch_no > 0)"
+  sleep 1
+  run_backup
+  expect_rc 1 "a restrictive policy reaching svc_backup"
+  expect_out "❌ pharmacy_alpha: a restrictive policy limits svc_backup's reads: public.riayati_transaction. Previous dump kept."
+  expect_no_out "❌ pharmacy_beta"
+  [ -e "${beta}" ] || fail "pharmacy_beta's first dump disappeared"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

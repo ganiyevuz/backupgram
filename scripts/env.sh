@@ -200,6 +200,19 @@ for _uint_var in BACKUP_MIN_BYTES; do
 done
 unset _uint_var
 
+# TRUE/FALSE settings
+# shellcheck disable=SC2043  # a list on purpose: more boolean settings join it
+for _bool_var in BACKUP_RLS_GUARD; do
+  case "${!_bool_var:-FALSE}" in
+    TRUE | FALSE) ;;
+    *)
+      echo "❌ ${_bool_var} must be TRUE or FALSE (got '${!_bool_var}')." >&2
+      exit 1
+      ;;
+  esac
+done
+unset _bool_var
+
 # Encryption (optional)
 if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
   if command -v gpg >/dev/null 2>&1; then

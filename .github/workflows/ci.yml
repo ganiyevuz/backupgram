@@ -154,6 +154,9 @@ jobs:
       - name: "Scenario: Pharmakon discovery (include globs, no-CONNECT skip)"
         run: bash tests/scenarios.sh pharmakon_discovery
 
+      - name: "Scenario: Pharmakon row-level-security guard"
+        run: bash tests/scenarios.sh pharmakon_rls_guard
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
