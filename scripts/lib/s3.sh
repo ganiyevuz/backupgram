@@ -20,15 +20,26 @@ s3_location() {
   fi
 }
 
+# Writes the status of a failed sync that s3-sync did not record itself.
+s3_status_failed() {
+  printf 'result failed %s\n' "$(date +%s)" > "${S3_STATUS_FILE}"
+}
+
 # One sync: upload what the bucket lacks, prune it, write the status file. 0 = ok.
-# A sync that ends without writing its status (killed, or it could not) leaves a failed one.
+# A sync that ends without writing its status (killed, or it could not) leaves a failed one,
+# as does a run whose S3 settings are invalid (s3-env.sh), which skips the sync.
 s3_sync() {
   rm -f "${S3_STATUS_FILE}"
+  if [ "${S3_SETTINGS_INVALID}" = "TRUE" ]; then
+    echo "⚠️ off-site: skipped, an S3 setting is invalid (see above). The local backup is not affected." >&2
+    s3_status_failed || true
+    return 1
+  fi
   if s3-sync sync --dir "${BACKUP_DIR}" --status "${S3_STATUS_FILE}"; then
     return 0
   fi
   if [ ! -e "${S3_STATUS_FILE}" ]; then
-    printf 'result failed %s\n' "$(date +%s)" > "${S3_STATUS_FILE}" || true
+    s3_status_failed || true
   fi
   return 1
 }

@@ -85,7 +85,9 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload); a
   backlog goes up newest first, so the newest copy arrives before the time limit.
   Unencrypted dumps stay local unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are
-  not uploaded. Off-site problems never change a backup run's exit code.
+  not uploaded. Off-site problems never change a backup run's exit code; a bad S3
+  setting refuses to start, and one that breaks later (an unreadable secret file) turns
+  the off-site copies off with a warning and a failed sync, never the local backups.
   `restore --from-s3 <db|key>` streams a dump from the bucket into the restore, and
   `list --s3 [db]` lists the bucket. New metrics `backupgram_offsite_*` (per database
   with a dump in `last/`; timestamp `0` when the bucket holds none of its dumps;

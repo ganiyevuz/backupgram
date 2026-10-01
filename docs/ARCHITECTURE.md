@@ -298,8 +298,10 @@ flowchart TD
 ## Off-site copies
 
 One Go binary, `s3-sync` (minio-go, built into the image like `tg-upload`), does the
-work; `scripts/s3-env.sh` resolves and validates the `S3_*` settings and
-`scripts/lib/s3.sh` runs it and renders the metrics. It runs in one of two places:
+work; `scripts/s3-env.sh` resolves and validates the `S3_*` settings (a bad one refuses
+to start; one that breaks later only turns the off-site copies off, with a failed sync,
+while the local backups go on) and `scripts/lib/s3.sh` runs it and renders the metrics.
+It runs in one of two places:
 
 - **End of a backup run:** `backup.sh` calls `s3-sync sync` after retention, in every
   run that reaches the dumps.

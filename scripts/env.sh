@@ -264,6 +264,13 @@ if [ ! -d "${BACKUP_DIR}" ] || [ ! -w "${BACKUP_DIR}" ] || [ ! -x "${BACKUP_DIR}
   exit 1
 fi
 
-# Off-site copies (S3): resolve and validate the S3_* settings.
+# Off-site copies (S3): resolve and validate the S3_* settings. Executed (the startup
+# check), a bad one refuses to start. Sourced by a run, it only turns the off-site copies
+# off (S3_SETTINGS_INVALID): the local backups and restores go on.
+_S3_ENV_LENIENT="FALSE"
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then
+  _S3_ENV_LENIENT="TRUE"
+fi
 # shellcheck source=scripts/s3-env.sh
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/s3-env.sh"
+unset _S3_ENV_LENIENT

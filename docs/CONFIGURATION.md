@@ -298,14 +298,17 @@ for endpoints, the runtime-config whitelist, and the security model.
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader (`BACKUPGRAM_MODE=s3-sync` only) |
 | `BACKUPGRAM_MODE` | `backup` | `backup` (the backup service) or `s3-sync` (a separate uploader container) |
 
-`env.sh` and the uploader's startup check validate these and exit `1` on a bad value:
-`S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
-`FALSE`, `S3_KEEP_*` whole numbers, `S3_SYNC_TIMEOUT` a whole number of seconds
-from 1 to 999999999 (at most 9 digits), `S3_ENDPOINT` must start with `http://` or
-`https://`, and with `S3_BUCKET` set both credentials must resolve to non-empty
-values. None of them is in the REST API's runtime-config whitelist, and empty
-`S3_KEEP_*` inherit the `BACKUP_KEEP_*` the container was started with, never a value
-changed through the REST API. The two
+`env.sh` (`VALIDATE_ON_START`) and the uploader's startup check validate these and
+refuse to start on a bad value (`❌ …`, exit `1`): `S3_FORCE_PATH_STYLE`, `S3_PRUNE`
+and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or `FALSE`, `S3_KEEP_*` whole numbers,
+`S3_SYNC_TIMEOUT` a whole number of seconds from 1 to 999999999 (at most 9 digits),
+`S3_ENDPOINT` must start with `http://` or `https://`, and with `S3_BUCKET` set both
+credentials must resolve to non-empty values. A setting that breaks after startup (an
+unreadable secret file after a rotation) only turns the off-site copies off: the local
+backups and restores go on, each run warns and records a failed sync, and
+`BackupgramOffsiteSyncFailed` fires. None of these settings is in the REST API's
+runtime-config whitelist, and empty `S3_KEEP_*` inherit the `BACKUP_KEEP_*` the
+container was started with, never a value changed through the REST API. The two
 deployments (at the end of a backup run, or a separate uploader), the retention
 rules and the disaster-recovery steps are in [OFFSITE.md](OFFSITE.md).
 

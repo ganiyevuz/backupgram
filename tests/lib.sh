@@ -37,6 +37,16 @@ run_backup() {
   printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
 }
 
+# Runs env.sh as init.sh's startup check does (executed, not sourced): a bad setting exits 1.
+# Output to RUN_OUT (echoed, indented), exit code to RUN_RC.
+run_startup_check() {
+  set +e
+  RUN_OUT="$(bash "${REPO_DIR}/scripts/env.sh" 2>&1)"
+  RUN_RC=$?
+  set -e
+  printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
+}
+
 # Runs the uploader's job without any database setting or key, as the uploader container does.
 # Output to RUN_OUT (echoed, indented), exit code to RUN_RC.
 run_uploader() {

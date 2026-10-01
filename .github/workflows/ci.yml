@@ -222,6 +222,9 @@ jobs:
       - name: "Scenario: S3 settings validated, _FILE secrets"
         run: bash tests/scenarios.sh s3_settings_validated
 
+      - name: "Scenario: an S3 setting that breaks after startup"
+        run: bash tests/scenarios.sh s3_setting_breaks_at_runtime
+
       - name: "Scenario: uploader mode (no database, read-only folder, 20 MiB dump)"
         run: bash tests/scenarios.sh s3_uploader_mode
 

@@ -150,7 +150,8 @@ volumes:
 ```
 
 The uploader validates only the S3 settings at start (`❌ …` and exit `1` on a bad
-one, and `BACKUPGRAM_MODE=s3-sync requires S3_BUCKET.` without a bucket). Its image
+one, and `BACKUPGRAM_MODE=s3-sync requires S3_BUCKET.` without a bucket), and again
+before each sync ([a setting that breaks later](#settings)). Its image
 healthcheck is unchanged: after a sync that failed, `go-cron` answers `503` and the
 container shows unhealthy (`last backup run exited 1`) until the next good sync.
 Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (see
@@ -176,13 +177,23 @@ Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader. Uploader mode only. |
 | `BACKUPGRAM_MODE` | `backup` | `backup` or `s3-sync` (the uploader). |
 
-The settings are validated at startup and in each run (`❌ …` and exit `1`):
+The settings are validated at startup, and a bad one stops the container from starting
+(`❌ …` and exit `1`; in backup mode with `VALIDATE_ON_START=TRUE`, the default):
 `S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
 `FALSE`, `S3_KEEP_*` whole numbers, `S3_SYNC_TIMEOUT` a whole number of seconds
 from 1 to 999999999 (at most 9 digits), `S3_ENDPOINT` must start with `http://` or
 `https://`, `BACKUPGRAM_MODE` must be `backup` or `s3-sync`, and with `S3_BUCKET` set
 both credentials must resolve to non-empty values (a `_FILE` that cannot be read is an
 error too). None of these settings can be changed through the REST API.
+
+A setting that breaks after startup (a secret file that becomes unreadable after a
+rotation, say) turns the off-site copies off until it is fixed; the local backups go
+on. A backup run prints `⚠️ <the problem>. Off-site copies are off until it is fixed.`
+and `⚠️ off-site: skipped, an S3 setting is invalid (see above). The local backup is not affected.`,
+records a failed sync (`BackupgramOffsiteSyncFailed` fires) and keeps its exit code.
+Local restores and `list` work as before; `restore --from-s3` exits `1` with
+`❌ restore --from-s3: an S3 setting is invalid (see above).` and `list --s3` with the
+`❌` line. The uploader prints the `❌` line, records a failed sync and exits `1`.
 
 ---
 
@@ -333,12 +344,14 @@ Log lines (the failures go to stderr):
 ⚠️ off-site prune skipped: no dump in /backups/last (a new or wrong folder?). Nothing deleted.
 ⚠️ off-site: no dump in /backups/last (a new or wrong folder?).
 ⚠️ off-site: the sync stopped after 3600s (S3_SYNC_TIMEOUT). It will be retried on the next run.
+⚠️ off-site: skipped, an S3 setting is invalid (see above). The local backup is not affected.
 ⚠️ Off-site sync did not complete; the next run retries.
 ```
 
 A folder with no dump in `last/` gets the `prune skipped` line, or with
-`S3_PRUNE=FALSE` the `no dump` line; neither fails the sync. The last line is the
-backup run's note when the sync failed. In uploader mode a run
+`S3_PRUNE=FALSE` the `no dump` line; neither fails the sync. The `skipped` line comes
+from a run whose S3 settings broke after startup ([Settings](#settings)). The last line
+is the backup run's note when the sync failed. In uploader mode a run
 that finds the previous one still running prints `⏳ Another off-site sync is running. Not started.`
 and exits `0`; a sync that failed exits `1`, so the container shows unhealthy until
 the next good sync.

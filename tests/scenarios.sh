@@ -589,13 +589,15 @@ scenario_s3_refuses_unencrypted() {
   [ "$(s3_keys | wc -l | tr -d ' ')" = "2" ] || fail "with S3_ALLOW_UNENCRYPTED=TRUE both dumps go up: $(s3_keys)"
 }
 
+# A bad S3 setting refuses to start (init.sh executes env.sh); in a run it only turns the
+# off-site copies off (scenario_s3_setting_breaks_at_runtime).
 scenario_s3_settings_validated() {
   fresh_backup_dir
   s3_env
-  S3_PRUNE="maybe" run_backup
+  S3_PRUNE="maybe" run_startup_check
   expect_rc 1 "a bad S3 setting"
-  expect_out "S3_PRUNE must be TRUE or FALSE"
-  S3_SECRET_ACCESS_KEY="" run_backup
+  expect_out "❌ S3_PRUNE must be TRUE or FALSE (got 'maybe')."
+  S3_SECRET_ACCESS_KEY="" run_startup_check
   expect_rc 1 "missing credentials"
   expect_out "S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY"
   local secret
@@ -606,11 +608,11 @@ scenario_s3_settings_validated() {
   expect_rc 0 "the _FILE secret wins over the plain variable"
   expect_out "☁️ database: uploaded"
   rm -f "${secret}"
-  S3_SYNC_TIMEOUT="0" run_backup
+  S3_SYNC_TIMEOUT="0" run_startup_check
   expect_rc 1 "a zero time limit"
   expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '0')."
   # Ten digits: s3-sync would refuse it, so the shell check does too.
-  S3_SYNC_TIMEOUT="1000000000" run_backup
+  S3_SYNC_TIMEOUT="1000000000" run_startup_check
   expect_rc 1 "a time limit of ten digits"
   expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '1000000000')."
   # Off-site retention follows the container's own BACKUP_KEEP_*, never a REST API override of
@@ -630,6 +632,59 @@ scenario_s3_settings_validated() {
   grep -qxF "test/database/database-${old}.dump.gpg" <<< "$(s3_keys)" \
     || fail "S3_KEEP_DAYS followed the REST API's BACKUP_KEEP_DAYS:\n$(s3_keys)"
   rm -f "${BACKUP_DIR}/.api-overrides.env"
+}
+
+# A setting that breaks after startup (a secret file gone after a rotation) turns the off-site
+# copies off, never the local backups or restores; restore --from-s3 refuses, and a backup run
+# and the uploader both record a failed sync rather than leave the last good one.
+scenario_s3_setting_breaks_at_runtime() {
+  fresh_backup_dir
+  s3_env
+  local dir file
+  dir="$(mktemp -d)"
+  export POSTGRES_EXTRA_OPTS="-Z1" METRICS_TEXTFILE_DIR="${dir}"
+  psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_broken WITH (FORCE)"
+  run_backup
+  expect_rc 0 "a backup before the setting breaks"
+  run_uploader
+  expect_rc 0 "the uploader before the setting breaks"
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 1' "${dir}/backupgram-offsite-CI_Test.prom" \
+    || fail "the uploader's first sync must succeed"
+  export S3_ACCESS_KEY_ID_FILE="/run/secrets/no-such-file"
+  set +e
+  RUN_OUT="$(bash "${REPO_DIR}/scripts/s3-env.sh" 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 1 "s3-env.sh executed, as at startup"
+  expect_out "❌ S3_ACCESS_KEY_ID_FILE points to a missing or unreadable file."
+  fresh_backup_dir
+  run_backup
+  expect_rc 0 "a backup run with a broken S3 setting"
+  file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz')"
+  expect_out "⚠️ S3_ACCESS_KEY_ID_FILE points to a missing or unreadable file. Off-site copies are off until it is fixed."
+  expect_out "⚠️ off-site: skipped, an S3 setting is invalid (see above). The local backup is not affected."
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/backupgram-CI_Test.prom" \
+    || fail "a run with a broken S3 setting must report offsite_sync_success 0:\n$(cat "${dir}/backupgram-CI_Test.prom")"
+  set +e
+  RUN_OUT="$(bash "${RESTORE_SH}" "${file}" restored_broken < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 0 "a local restore with a broken S3 setting"
+  [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_broken'")" = "1" ] \
+    || fail "the local restore did not create its target"
+  set +e
+  RUN_OUT="$(bash "${RESTORE_SH}" --from-s3 database restored_broken < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 1 "restore --from-s3 with a broken S3 setting"
+  expect_out "❌ restore --from-s3: an S3 setting is invalid (see above)."
+  run_uploader
+  expect_rc 1 "the uploader with a broken S3 setting"
+  expect_out "❌ S3_ACCESS_KEY_ID_FILE points to a missing or unreadable file."
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/backupgram-offsite-CI_Test.prom" \
+    || fail "the uploader kept a stale success:\n$(cat "${dir}/backupgram-offsite-CI_Test.prom")"
+  psql_su -d postgres -c "DROP DATABASE restored_broken WITH (FORCE)"
+  rm -rf "${dir}"
 }
 
 scenario_s3_uploader_mode() {

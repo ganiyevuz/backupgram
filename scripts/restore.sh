@@ -45,6 +45,10 @@ if [ "$1" = "--from-s3" ]; then
     echo "❌ Usage: restore --from-s3 <database|key> [target_db]" >&2
     exit 1
   fi
+  if [ "${S3_SETTINGS_INVALID}" = "TRUE" ]; then
+    echo "❌ restore --from-s3: an S3 setting is invalid (see above)." >&2
+    exit 1
+  fi
   if ! s3_enabled; then
     echo "❌ restore --from-s3 needs S3_BUCKET and its credentials." >&2
     exit 1
