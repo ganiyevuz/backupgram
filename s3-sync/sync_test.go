@@ -146,3 +146,29 @@ func TestRunSyncStatusRoundTrip(t *testing.T) {
 		t.Errorf("status = %s", raw)
 	}
 }
+
+// A new or wrong folder (no dump in last/) is never "every database was dropped": pruning
+// is skipped, so a new server restoring from the bucket keeps the copies it is restoring.
+func TestRunSyncSkipsPruneWithoutLocalDumps(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "last"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	st := newFake()
+	st.objects["p/db/db-20261110-040000.dump.gpg"] = make([]byte, 10)     // expires
+	st.objects["p/gone/gone-20260910-040000.dump.gpg"] = make([]byte, 10) // expires
+	var out, errOut bytes.Buffer
+	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
+	if !res.OK || res.Pruned != 0 {
+		t.Fatalf("result %+v\nerr %s", res, errOut.String())
+	}
+	if len(st.objects) != 2 {
+		t.Errorf("objects were deleted: %v", st.objects)
+	}
+	if !strings.Contains(errOut.String(), "⚠️ off-site prune skipped: no dump in "+dir+"/last (a new or wrong folder?). Nothing deleted.") {
+		t.Errorf("stderr = %s", errOut.String())
+	}
+	if strings.Contains(out.String(), "removed") {
+		t.Errorf("out = %s", out.String())
+	}
+}

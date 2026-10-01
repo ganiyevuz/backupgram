@@ -40,8 +40,14 @@ func RunSync(ctx context.Context, st Storage, s Settings, dir string, now time.T
 	}
 	prune := s.Prune
 	live, err := LiveDatabases(dir)
-	if err != nil {
+	switch {
+	case err != nil:
 		fmt.Fprintf(errOut, "⚠️ off-site: cannot read %s/last (%v); nothing pruned.\n", dir, err)
+		prune = false
+	case prune && len(live) == 0:
+		// An empty or wrong folder is never "every database was dropped": on a new server
+		// that is restoring, pruning would delete the very copies being restored.
+		fmt.Fprintf(errOut, "⚠️ off-site prune skipped: no dump in %s/last (a new or wrong folder?). Nothing deleted.\n", dir)
 		prune = false
 	}
 	listing, err := st.List(ctx, ListPrefix(s.Prefix))
