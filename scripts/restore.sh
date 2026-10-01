@@ -298,16 +298,27 @@ backup_stream() {
     cat "${RESTORE_FILE}"
   fi
 }
-# After a failed `backup_stream | …` pipeline, called as
-#   stream_failure "$?" "${PIPESTATUS[0]}"
-# (both expanded in the same command, before either is reset). A failing gpg, the
-# first stage, means the backup could not be read: exit 1 with a clear message.
-# Any other failure is returned for the caller to treat as fatal or as a warning.
+# After a failed `backup_stream | … | <restore>` pipeline, called as
+#   stream_failure "$?" "${PIPESTATUS[@]}"
+# (both expanded in the same command, before either is reset). The stages before the
+# restore read the backup: the stream itself when it decrypts or downloads, and gunzip.
+# One of them failing means the backup could not be read: exit 1 with a clear message.
+# That catches a damaged encrypted dump (gpg's integrity check) and a damaged .sql.gz
+# (gzip's checksum); a damaged unencrypted custom-format or plain .sql dump shows only
+# as pg_restore / psql errors. A reading stage killed by SIGPIPE (141) only saw the
+# restore stop first, so the restore's own status decides. Any other failure is returned
+# for the caller to treat as fatal or as a warning.
 stream_failure() {
-  if [ "${STREAM_DECRYPT}" = "TRUE" ] && [ "$2" -ne 0 ]; then
-    unreadable_backup
-  fi
-  return "$1"
+  local rc="$1" stage=0
+  shift
+  while [ "$#" -gt 1 ]; do
+    if [ "$1" -ne 0 ] && [ "$1" -ne 141 ] && { [ "${stage}" -gt 0 ] || [ "${STREAM_DECRYPT}" = "TRUE" ]; }; then
+      unreadable_backup
+    fi
+    stage=$((stage + 1))
+    shift
+  done
+  return "${rc}"
 }
 # Without .gpg, the name tells the format.
 RESTORE_NAME="${RESTORE_FILE%.gpg}"
@@ -353,21 +364,21 @@ elif [[ "${RESTORE_NAME}" == *.sql.gz ]]; then
   if [ "${IS_CLUSTER}" = "TRUE" ]; then
     echo "🌐 Cluster dump detected. Restoring all databases..."
     backup_stream | gunzip -c | psql -d postgres \
-      || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?
+      || stream_failure "$?" "${PIPESTATUS[@]}" || exit $?
   else
     backup_stream | gunzip -c | psql -d "${TARGET_DB}" \
-      || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?
+      || stream_failure "$?" "${PIPESTATUS[@]}" || exit $?
   fi
 elif [[ "${RESTORE_NAME}" == *.sql ]]; then
   # Plain SQL dump
   echo "📄 Detected plain SQL dump."
   backup_stream | psql -d "${TARGET_DB}" \
-    || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?
+    || stream_failure "$?" "${PIPESTATUS[@]}" || exit $?
 elif [ "${STREAM_DECRYPT}" = "TRUE" ]; then
   # Encrypted archive (custom format): decrypt straight into pg_restore
   echo "📦 Attempting pg_restore (archive format)..."
   backup_stream | pg_restore -d "${TARGET_DB}" --clean --if-exists 2>&1 \
-    || stream_failure "$?" "${PIPESTATUS[0]}" \
+    || stream_failure "$?" "${PIPESTATUS[@]}" \
     || echo "⚠️ pg_restore completed with warnings."
 else
   # Try pg_restore (custom/archive format)

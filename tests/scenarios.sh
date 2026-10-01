@@ -834,31 +834,33 @@ SH
 }
 
 # A download cut off mid-stream: a database this restore created is dropped again; one that
-# already existed is left alone, with a warning that it may be partially restored.
+# already existed is left alone, with a warning that it may be partially restored. A damaged
+# .sql.gz that arrives in full (or a local one) gets the same cleanup: gunzip fails.
 scenario_s3_restore_interrupted() {
   fresh_backup_dir
   s3_env
-  local shims
+  local shims file damaged
   psql_su -d database -c "DROP TABLE IF EXISTS cut_probe" \
     -c "CREATE TABLE cut_probe AS SELECT g AS id, md5(g::text) AS v FROM generate_series(1, 100000) g"
   psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_cut WITH (FORCE)"
   POSTGRES_EXTRA_OPTS="-Z1" BACKUP_SUFFIX=".sql.gz" BACKUP_ENCRYPTION_KEY="" S3_ALLOW_UNENCRYPTED="TRUE" run_backup
   expect_rc 0 "an unencrypted backup with an off-site copy"
-  # A shim ahead of the real s3-sync: `get` passes the object's first 8 KiB, then fails.
+  # A shim ahead of the real s3-sync: `get` passes the object's first 8 KiB, then exits
+  # SHIM_GET_RC: 1 (default) is a download cut off, 0 a damaged object that arrives in full.
   shims="$(mktemp -d)"
   cat > "${shims}/s3-sync" <<'SH'
 #!/bin/sh
 PATH="${PATH#"${SHIM_DIR}":}"
 if [ "$1" = "get" ]; then
   s3-sync "$@" | head -c 8192
-  exit 1
+  exit "${SHIM_GET_RC:-1}"
 fi
 exec s3-sync "$@"
 SH
   chmod +x "${shims}/s3-sync"
   cut_restore() {
     set +e
-    RUN_OUT="$(PATH="${shims}:${PATH}" SHIM_DIR="${shims}" BACKUP_ENCRYPTION_KEY="" \
+    RUN_OUT="$(PATH="${shims}:${PATH}" SHIM_DIR="${shims}" SHIM_GET_RC="${1:-1}" BACKUP_ENCRYPTION_KEY="" \
       bash "${RESTORE_SH}" --from-s3 database restored_cut < /dev/null 2>&1)"
     RUN_RC=$?
     set -e
@@ -877,8 +879,28 @@ SH
   [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "1" ] \
     || fail "a database the restore did not create was dropped"
   psql_su -d postgres -c "DROP DATABASE restored_cut WITH (FORCE)"
+  # A truncated .sql.gz that downloads in full: s3-sync exits 0, gunzip fails after psql has
+  # applied part of it.
+  cut_restore 0
+  expect_rc 1 "a damaged object that downloads in full, into a new database"
+  expect_out "❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object)."
+  [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "0" ] \
+    || fail "the database this restore created from a damaged object was not dropped"
+  # The same damage in a local file.
+  file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz')"
+  damaged="$(mktemp -d)/$(basename "${file}")"
+  head -c 8192 "${file}" > "${damaged}"
+  set +e
+  RUN_OUT="$(BACKUP_ENCRYPTION_KEY="" bash "${RESTORE_SH}" "${damaged}" restored_cut < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
+  expect_rc 1 "a damaged local .sql.gz, into a new database"
+  expect_out "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)."
+  [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "0" ] \
+    || fail "the database this restore created from a damaged local file was not dropped"
   psql_su -d database -c "DROP TABLE cut_probe"
-  rm -rf "${shims}"
+  rm -rf "${shims}" "$(dirname "${damaged}")"
 }
 
 scenario_s3_list() {

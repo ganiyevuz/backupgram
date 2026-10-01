@@ -398,9 +398,12 @@ The restore streams the object from the bucket through `gpg` into `pg_restore` /
 not hold exits `1` with `❌ <name>: not found in s3://<bucket>/<prefix>.`
 
 A stream that fails exits `1` with `❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object).`
-A wrong key fails before anything is restored, but a download cut off part-way (or a
-damaged object) may already have restored part of the dump. If the restore created
-the target database, it drops it again. An existing target is left as it is and gets
+A damaged object is caught when it is encrypted (gpg's integrity check) or a `.sql.gz`
+(gzip's checksum); a damaged unencrypted custom-format or plain `.sql` dump shows only
+as `pg_restore` / `psql` errors in the output. A wrong key fails before anything is
+restored, but a download cut off part-way (or a damaged object) may already have
+restored part of the dump. If the restore created the target database, it drops it
+again. An existing target is left as it is and gets
 `⚠️ '<db>' may be partially restored: drop it before retrying.` Drop it (or restore
 under another name) before you retry.
 

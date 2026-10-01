@@ -78,8 +78,11 @@ Encrypted dumps stream into the restore (custom-format, `.sql` and `.sql.gz`):
 nothing is decrypted to disk, and the key is passed through a temporary passphrase
 file, never on a command line. A wrong `BACKUP_ENCRYPTION_KEY` or a damaged file
 exits `1` with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
-damaged file).` A wrong key fails before anything is restored; a damaged file can
-fail part-way. Either way, a target database the restore created is dropped again,
+damaged file).` Damage is caught in encrypted dumps (gpg's integrity check) and in
+gzip SQL dumps (`.sql.gz`, gzip's checksum), encrypted or not; a damaged unencrypted
+custom-format or plain `.sql` dump shows only as `pg_restore` / `psql` errors in the
+output. A wrong key fails before anything is restored; a damaged file can fail
+part-way. Either way, a target database the restore created is dropped again,
 and an existing one gets `⚠️ '<db>' may be partially restored: drop it before
 retrying.`
 
@@ -130,8 +133,11 @@ The object streams from the bucket through `gpg` into the restore: nothing in cl
 text is written to disk. Exit `1` when the database or key is not found in the bucket
 (`❌ <name>: not found in s3://<bucket>/<prefix>.`, nothing restored) or when the
 stream fails (`❌ Could not read the backup (download interrupted, wrong
-BACKUP_ENCRYPTION_KEY, or a damaged object).`). A wrong key fails before anything is
-restored, but a download cut off part-way may already have restored part of the dump:
+BACKUP_ENCRYPTION_KEY, or a damaged object).`). A damaged object is caught when it is
+encrypted (gpg's integrity check) or a `.sql.gz` (gzip's checksum); a damaged
+unencrypted custom-format or plain `.sql` dump shows only as `pg_restore` / `psql`
+errors in the output. A wrong key fails before anything is restored, but a download
+cut off part-way may already have restored part of the dump:
 a target database the restore created is then dropped again, and an existing one is
 left with `⚠️ '<db>' may be partially restored: drop it before retrying.` Drop it, or
 restore under another name, before you retry.
