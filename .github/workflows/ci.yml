@@ -222,6 +222,15 @@ jobs:
       - name: "Scenario: S3 settings validated, _FILE secrets"
         run: bash tests/scenarios.sh s3_settings_validated
 
+      - name: "Scenario: uploader mode (no database, read-only folder, 20 MiB dump)"
+        run: bash tests/scenarios.sh s3_uploader_mode
+
+      - name: "Scenario: off-site retention tiers"
+        run: bash tests/scenarios.sh s3_prune_tiers
+
+      - name: "Scenario: S3_PRUNE=FALSE"
+        run: bash tests/scenarios.sh s3_no_prune
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

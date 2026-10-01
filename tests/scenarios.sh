@@ -598,6 +598,107 @@ scenario_s3_settings_validated() {
   rm -f "${secret}"
 }
 
+scenario_s3_uploader_mode() {
+  fresh_backup_dir
+  local dir marker key keys
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 0 "a local backup for the uploader"
+  # An in-flight dump and a large one (more than one multipart part).
+  touch "${BACKUP_DIR}/last/.database-20990101-000000.dump.gpg.part"
+  head -c $((20 * 1024 * 1024)) /dev/urandom > "${BACKUP_DIR}/daily/big-$(date +%Y%m%d)-120000.dump.gpg"
+  s3_env
+  dir="$(mktemp -d)"
+  marker="$(mktemp)"
+  sleep 1
+  METRICS_TEXTFILE_DIR="${dir}" run_uploader
+  expect_rc 0 "the uploader's run"
+  expect_out "☁️ database: uploaded test/database/database-"
+  expect_out "☁️ big: uploaded test/big/big-"
+  keys="$(s3_keys)"
+  if grep -q '\.part' <<< "${keys}"; then fail "an in-flight .part was uploaded"; fi
+  key="$(grep '^test/big/' <<< "${keys}")"
+  [ "$(s3-sync ls | grep -F "${key}" | cut -f2)" = "$((20 * 1024 * 1024))" ] || fail "the large dump is incomplete"
+  [ -z "$(find "${BACKUP_DIR}" -newer "${marker}" -print -quit)" ] || fail "the uploader wrote into BACKUP_DIR"
+  promtool check metrics < "${dir}/backupgram-offsite-CI_Test.prom" || fail "promtool rejects the uploader's metrics"
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 1' "${dir}/backupgram-offsite-CI_Test.prom" || fail "success metric"
+  S3_SECRET_ACCESS_KEY="wrong" METRICS_TEXTFILE_DIR="${dir}" run_uploader
+  expect_rc 1 "the uploader fails on bad credentials"
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/backupgram-offsite-CI_Test.prom" || fail "failure metric"
+  set +e
+  RUN_OUT="$(env -u S3_BUCKET BACKUPGRAM_MODE=s3-sync bash "${REPO_DIR}/scripts/s3-env.sh" 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 1 "uploader mode without a bucket"
+  expect_out "BACKUPGRAM_MODE=s3-sync requires S3_BUCKET."
+  rm -rf "${dir}" "${marker}"
+}
+
+# Off-site retention: tiers by the stamp, the newest copy of a live database, a dropped database.
+scenario_s3_prune_tiers() {
+  fresh_backup_dir
+  s3_env
+  mkdir -p "${BACKUP_DIR}/last" "${BACKUP_DIR}/daily"
+  local recent sunday weekday first oldday n d s
+  recent="$(date -d '1 day ago' +%Y%m%d)-120000"
+  d="$(date -d '15 days ago' +%u)"
+  sunday="$(date -d "$((15 + d % 7)) days ago" +%Y%m%d)-120000"              # a Sunday 15–21 days ago: weekly
+  for n in 15 16 17 18 19 20 21; do                                           # neither a Sunday nor the 1st: expires
+    if [ "$(date -d "${n} days ago" +%u)" != 7 ] && [ "$(date -d "${n} days ago" +%d)" != 01 ]; then
+      weekday="$(date -d "${n} days ago" +%Y%m%d)-120000"
+      break
+    fi
+  done
+  first="$(date -d "$(date -d '40 days ago' +%Y-%m-01)" +%Y%m%d)-120000"     # a 1st 40–70 days ago: monthly
+  for n in 40 41 42 43 44 45 46 47; do                                        # 40+ days, not the 1st: expires
+    if [ "$(date -d "${n} days ago" +%d)" != 01 ]; then
+      oldday="$(date -d "${n} days ago" +%Y%m%d)-120000"
+      break
+    fi
+  done
+  for s in "${recent}" "${sunday}" "${weekday}" "${first}" "${oldday}"; do
+    head -c 2048 /dev/urandom > "${BACKUP_DIR}/daily/app-${s}.dump.gpg"
+  done
+  # A live database whose only dump is old (it keeps failing): its newest copy stays.
+  head -c 2048 /dev/urandom > "${BACKUP_DIR}/daily/stale-${oldday}.dump.gpg"
+  ln "${BACKUP_DIR}/daily/stale-${oldday}.dump.gpg" "${BACKUP_DIR}/last/stale-${oldday}.dump.gpg"
+  # A dropped database (nothing in last/): its copy ages out.
+  head -c 2048 /dev/urandom > "${BACKUP_DIR}/daily/gone-${oldday}.dump.gpg"
+  export S3_KEEP_DAYS=7 S3_KEEP_WEEKS=4 S3_KEEP_MONTHS=3
+
+  S3_PRUNE="FALSE" run_uploader
+  expect_rc 0 "upload-only pass"
+  [ "$(s3_keys | wc -l | tr -d ' ')" = "7" ] || fail "S3_PRUNE=FALSE must upload everything: $(s3_keys)"
+  expect_no_out "removed"
+
+  run_uploader
+  expect_rc 0 "pruning pass"
+  expect_out "🗑️ off-site: removed test/app/app-${weekday}.dump.gpg"
+  local want
+  want="$(printf '%s\n' "test/app/app-${recent}.dump.gpg" "test/app/app-${sunday}.dump.gpg" \
+    "test/app/app-${first}.dump.gpg" "test/stale/stale-${oldday}.dump.gpg" | sort)"
+  [ "$(s3_keys)" = "${want}" ] || fail "after pruning:\n$(s3_keys)\nwant:\n${want}"
+}
+
+scenario_s3_no_prune() {
+  fresh_backup_dir
+  s3_env
+  local old n
+  mkdir -p "${BACKUP_DIR}/daily"
+  for n in 40 41 42; do
+    if [ "$(date -d "${n} days ago" +%d)" != 01 ]; then
+      old="$(date -d "${n} days ago" +%Y%m%d)-120000"
+      break
+    fi
+  done
+  head -c 1024 /dev/urandom > "${BACKUP_DIR}/daily/app-${old}.dump.gpg"
+  S3_PRUNE="FALSE" run_uploader
+  expect_rc 0 "first pass"
+  S3_PRUNE="FALSE" run_uploader
+  expect_rc 0 "second pass"
+  expect_no_out "removed"
+  [ "$(s3_keys)" = "test/app/app-${old}.dump.gpg" ] || fail "an expired object was removed with S3_PRUNE=FALSE: $(s3_keys)"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

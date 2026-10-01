@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -Eeo pipefail
 
+# Uploader mode: only the off-site sync, on S3_SCHEDULE. No database settings, no key:
+# the backup folder may be mounted read-only.
+if [ "${BACKUPGRAM_MODE}" = "s3-sync" ]; then
+  if ! /scripts/s3-env.sh; then
+    echo "Error: Validation failed, aborting." >&2
+    exit 1
+  fi
+  echo "Starting the off-site uploader (schedule: ${S3_SCHEDULE:-*/15 * * * *}, health check port: ${HEALTHCHECK_PORT})."
+  exec /usr/local/bin/go-cron -s "${S3_SCHEDULE:-*/15 * * * *}" -p "${HEALTHCHECK_PORT}" -- /scripts/s3-sync.sh
+fi
+
 # Prevalidate configuration (don't source)
 if [ "${VALIDATE_ON_START}" = "TRUE" ]; then
   echo "Running pre-validation script..."

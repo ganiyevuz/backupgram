@@ -37,6 +37,17 @@ run_backup() {
   printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
 }
 
+# Runs the uploader's job without any database setting or key, as the uploader container does.
+# Output to RUN_OUT (echoed, indented), exit code to RUN_RC.
+run_uploader() {
+  set +e
+  RUN_OUT="$(env -u POSTGRES_HOST -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB \
+    -u BACKUP_ENCRYPTION_KEY BACKUPGRAM_MODE=s3-sync bash "${REPO_DIR}/scripts/s3-sync.sh" 2>&1)"
+  RUN_RC=$?
+  set -e
+  printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
+}
+
 # Like run_backup, with the clock starting at $1 (it keeps running).
 run_backup_at() {
   set +e
