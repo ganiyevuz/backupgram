@@ -724,6 +724,62 @@ scenario_s3_uploader_mode() {
   rm -rf "${dir}" "${marker}"
 }
 
+# docker stop on the uploader: init.sh runs go-cron under tini -s -g, so the TERM reaches the
+# running sync (go-cron itself never passes it on). The sync stops, the job writes the metrics
+# of a failed sync, go-cron and tini exit, all within Docker's 10 s stop timeout.
+scenario_s3_uploader_stop() {
+  fresh_backup_dir
+  local shims dir log pid rc i
+  shims="$(mktemp -d)"
+  dir="$(mktemp -d)"
+  log="${dir}/uploader.log"
+  mkdir "${dir}/textfile"
+  # An s3-sync that runs until TERM, then stops as the real one does: a failed status, exit 1.
+  cat > "${shims}/s3-sync" <<'SH'
+#!/usr/bin/env bash
+status=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--status" ]; then status="$2"; fi
+  shift
+done
+trap 'touch "${SHIM_DIR}/got-term"; printf "result failed %s\n" "$(date +%s)" > "${status}"; exit 1' TERM
+touch "${SHIM_DIR}/started"
+sleep 60
+SH
+  chmod +x "${shims}/s3-sync"
+  env -u POSTGRES_HOST -u POSTGRES_USER -u POSTGRES_PASSWORD -u POSTGRES_DB -u BACKUP_ENCRYPTION_KEY \
+    PATH="${shims}:${PATH}" SHIM_DIR="${shims}" BACKUPGRAM_MODE=s3-sync \
+    S3_BUCKET="unused" S3_ACCESS_KEY_ID="unused" S3_SECRET_ACCESS_KEY="unused" S3_ENDPOINT="${TEST_S3_ENDPOINT}" \
+    S3_STATUS_FILE="${dir}/status" METRICS_TEXTFILE_DIR="${dir}/textfile" \
+    tini -s -g -- go-cron -s '@every 1h' -p 0 -i -- "${REPO_DIR}/scripts/s3-sync.sh" < /dev/null > "${log}" 2>&1 &
+  pid=$!
+  for i in $(seq 1 100); do
+    [ ! -e "${shims}/started" ] || break
+    sleep 0.1
+  done
+  [ -e "${shims}/started" ] || fail "the sync did not start:\n$(cat "${log}")"
+  [ ! -e "${dir}/textfile/backupgram-offsite-CI_Test.prom" ] || fail "metrics written before the stop"
+  kill -TERM "${pid}"
+  for i in $(seq 1 100); do
+    kill -0 "${pid}" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill -KILL "${pid}"
+    fail "tini still runs 10 s after TERM:\n$(cat "${log}")"
+  fi
+  set +e
+  wait "${pid}"
+  rc=$?
+  set -e
+  sed 's/^/    │ /' "${log}"
+  [ "${rc}" = "0" ] || fail "tini exited ${rc} after TERM, expected 0 (go-cron's exit)"
+  [ -e "${shims}/got-term" ] || fail "the running sync never got the TERM"
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/textfile/backupgram-offsite-CI_Test.prom" \
+    || fail "no failed sync in the metrics after the stop"
+  rm -rf "${shims}" "${dir}"
+}
+
 # Off-site retention: tiers by the stamp, the newest copy of a live database, a dropped database.
 scenario_s3_prune_tiers() {
   fresh_backup_dir

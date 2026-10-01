@@ -28,6 +28,12 @@ if ! s3_enabled; then
   exit 1
 fi
 
+# docker stop: tini (init.sh) sends TERM to the whole process group, so a running s3-sync
+# gets it too and stops on its own (it aborts its upload and writes a failed status). The
+# trap only records the TERM: bash waits for s3-sync, then writes the metrics and exits.
+STOPPING="FALSE"
+trap 'STOPPING="TRUE"' TERM
+
 # One sync at a time in this container (go-cron may start the next one early).
 exec 201>"${S3_STATUS_FILE}.lock"
 if ! flock -n 201; then
@@ -35,6 +41,10 @@ if ! flock -n 201; then
   exit 0
 fi
 
+# Stopped before the sync began: start none.
+if [ "${STOPPING}" = "TRUE" ]; then
+  exit 0
+fi
 RC=0
 s3_sync || RC=1
 write_offsite_metrics || echo "⚠️ Could not write the off-site metrics." >&2

@@ -120,12 +120,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
 
-      - name: Install scenario test tools (faketime, promtool)
+      - name: Install scenario test tools (faketime, promtool, tini, go-cron)
         run: |
-          sudo apt-get install -y faketime
+          sudo apt-get install -y faketime tini
           curl -fsSL https://github.com/prometheus/prometheus/releases/download/v3.5.0/prometheus-3.5.0.linux-amd64.tar.gz \
             | sudo tar -xz -C /usr/local/bin --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
           promtool --version
+          sudo curl -fsSL -o /usr/local/bin/go-cron.gz \
+            https://github.com/prodrigestivill/go-cron/releases/download/v0.0.11/go-cron-linux-amd64.gz
+          sudo gunzip -f /usr/local/bin/go-cron.gz
+          sudo chmod a+x /usr/local/bin/go-cron
+          tini --version
 
       - name: Start the S3 test server (RustFS) and build s3-sync
         run: |
@@ -227,6 +232,9 @@ jobs:
 
       - name: "Scenario: uploader mode (no database, read-only folder, 20 MiB dump)"
         run: bash tests/scenarios.sh s3_uploader_mode
+
+      - name: "Scenario: docker stop reaches the uploader's running sync (tini -g)"
+        run: bash tests/scenarios.sh s3_uploader_stop
 
       - name: "Scenario: off-site retention tiers"
         run: bash tests/scenarios.sh s3_prune_tiers

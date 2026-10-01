@@ -83,7 +83,10 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   credentials and object lock). Each sync stops at `S3_SYNC_TIMEOUT` (default 3600 s)
   and counts as failed, so a stalled endpoint holds up the backups (their lock) for at
   most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload); a
-  backlog goes up newest first, so the newest copy arrives before the time limit.
+  backlog goes up newest first, so the newest copy arrives before the time limit. The
+  uploader runs `go-cron` under `tini -s -g`, so `docker stop` stops a running sync
+  cleanly (it aborts its upload and records a failed sync); in backup mode
+  `docker stop` waits for the running backup up to the stop timeout, as before.
   Unencrypted dumps stay local unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are
   not uploaded. Off-site problems never change a backup run's exit code; a bad S3
   setting refuses to start, and one that breaks later (an unreadable secret file) turns

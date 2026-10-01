@@ -44,7 +44,7 @@ ARG TARGETOS
 ARG TARGETARCH
 
 RUN set -x \
-    && apk update && apk add --no-cache ca-certificates curl gnupg \
+    && apk update && apk add --no-cache ca-certificates curl gnupg tini \
     && curl --fail --retry 4 --retry-all-errors -L "https://github.com/prodrigestivill/go-cron/releases/download/${GOCRONVER}/go-cron-${TARGETOS}-${TARGETARCH}-static.gz" | zcat > /usr/local/bin/go-cron \
     && chmod a+x /usr/local/bin/go-cron
 

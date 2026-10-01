@@ -57,7 +57,7 @@ RUN set -x \
 
 # Install required dependencies and download go-cron
 RUN set -x \
-    && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg tini \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && curl --fail --retry 4 --retry-all-errors -L "https://github.com/prodrigestivill/go-cron/releases/download/${GOCRONVER}/go-cron-${TARGETOS}-${TARGETARCH}.gz" -o /usr/local/bin/go-cron.gz \
     && gunzip /usr/local/bin/go-cron.gz && chmod a+x /usr/local/bin/go-cron

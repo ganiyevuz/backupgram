@@ -20,7 +20,7 @@ The container entrypoint chain:
 
 ```
 init.sh (ENTRYPOINT)
-  ├─ BACKUPGRAM_MODE=s3-sync:        /scripts/s3-env.sh, then exec go-cron -s "$S3_SCHEDULE" -p "$HEALTHCHECK_PORT" -- /scripts/s3-sync.sh   # the off-site uploader
+  ├─ BACKUPGRAM_MODE=s3-sync:        /scripts/s3-env.sh, then exec tini -s -g -- go-cron -s "$S3_SCHEDULE" -p "$HEALTHCHECK_PORT" -- /scripts/s3-sync.sh   # the off-site uploader; tini -g passes docker stop's TERM to the running sync (go-cron never does)
   └─ /env.sh                         # standalone validation when VALIDATE_ON_START=TRUE
   ├─ REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE:  exec backupgram-api   # PID 1; supervises go-cron as a child and can restart it
   └─ otherwise:             exec go-cron -s "$SCHEDULE" -p "$HEALTHCHECK_PORT" [-i] -- /backup.sh

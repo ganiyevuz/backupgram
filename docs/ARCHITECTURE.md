@@ -85,7 +85,7 @@ flowchart TB
 
 ```
 init.sh (ENTRYPOINT)
-  ├─ BACKUPGRAM_MODE=s3-sync:  /scripts/s3-env.sh, then exec go-cron -s "$S3_SCHEDULE" -- /scripts/s3-sync.sh
+  ├─ BACKUPGRAM_MODE=s3-sync:  /scripts/s3-env.sh, then exec tini -s -g -- go-cron -s "$S3_SCHEDULE" -- /scripts/s3-sync.sh
   └─ /env.sh            # standalone validation when VALIDATE_ON_START=TRUE
   ├─ REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE:  exec backupgram-api   # supervises go-cron
   └─ otherwise:                                    exec go-cron -s "$SCHEDULE" -- /backup.sh
@@ -102,7 +102,11 @@ when `REST_API_ENABLE=TRUE` (see [MONITORING.md](MONITORING.md) and
 With `BACKUPGRAM_MODE=s3-sync`, `init.sh` validates only the S3 settings
 (`scripts/s3-env.sh`: no `POSTGRES_*`, no key) and `exec`s go-cron with
 `scripts/s3-sync.sh` on `S3_SCHEDULE`: the container is an off-site uploader and
-nothing else (see [Off-site copies](#off-site-copies)).
+nothing else (see [Off-site copies](#off-site-copies)). go-cron runs under
+`tini -s -g`: on `docker stop` go-cron only waits for its job, so tini sends the
+`SIGTERM` to the whole process group and the running sync stops cleanly (`-s` makes
+tini a subreaper when it is not PID 1, e.g. under compose `init: true`). In backup
+mode `docker stop` still waits for a running backup up to the stop timeout.
 
 `backup.sh` sources its helpers from `scripts/lib/`: `layout.sh` (folders, links,
 retention), `dump.sh` (format detection, streaming dump, verification),
@@ -311,7 +315,8 @@ It runs in one of two places:
   failed (so go-cron answers `503` and the container shows unhealthy). It needs no
   database settings and no key, and the backup folder can be mounted read-only.
 
-Each sync stops at `S3_SYNC_TIMEOUT` (an hour by default; `SIGTERM` stops it too) and
+Each sync stops at `S3_SYNC_TIMEOUT` (an hour by default; `SIGTERM` stops it too, which
+`docker stop` delivers in the uploader) and
 then counts as failed, so a stalled endpoint holds the backup's lock, or the
 uploader's, for at most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished
 upload; the uploads not yet started send nothing).

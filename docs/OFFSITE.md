@@ -55,6 +55,12 @@ run that reaches the dumps syncs the bucket; a run that stops before them (the
 database unreachable, too little disk space) does not. The sync runs even when every
 dump failed, so it can still upload dumps an earlier sync missed.
 
+`docker stop` waits for a running backup, its sync included, up to the stop timeout
+(Docker's default 10 s, or the service's `stop_grace_period`), so that raising the
+timeout lets a long backup finish. A sync still running at the timeout is killed
+outright and cannot abort its unfinished upload: the bucket's lifecycle rule cleans
+up after it ([Providers](#providers)).
+
 ```yaml
 services:
   backup:
@@ -157,6 +163,11 @@ container shows unhealthy (`last backup run exited 1`) until the next good sync.
 Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (see
 [Failures and monitoring](#failures-and-monitoring)).
 
+`docker stop` stops a running sync cleanly: the uploader runs `go-cron` under
+`tini -s -g`, which passes the `SIGTERM` to the sync (`go-cron` alone never would).
+The sync aborts its unfinished upload, records a failed sync in the metrics, and the
+container exits well within Docker's 10 s stop timeout.
+
 ---
 
 ## Settings
@@ -173,7 +184,7 @@ Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (
 | `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers. Empty means the container's own `BACKUP_KEEP_*` (the image defaults `7` / `4` / `6` unless you set them), as the container was started with: a `BACKUP_KEEP_*` changed through the REST API does not change them. |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only; backupgram never deletes from the bucket. |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix. |
-| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds from 1 to 999999999. A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit or by `SIGTERM` tries to abort its unfinished upload, which a stalled endpoint may not answer and a sync killed outright cannot do: set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds from 1 to 999999999. A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit, or in the uploader by `docker stop`, tries to abort its unfinished upload, which a stalled endpoint may not answer and a sync killed outright cannot do (in backup mode, one still running when `docker stop` times out): set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader. Uploader mode only. |
 | `BACKUPGRAM_MODE` | `backup` | `backup` or `s3-sync` (the uploader). |
 
@@ -310,9 +321,10 @@ does not create buckets. Use `http://` only on a private network and `https://`
 across the internet. Garage's default region is `garage`.
 
 **Abort incomplete multipart uploads.** A dump over 16 MiB goes up in parts. A sync
-stopped by `S3_SYNC_TIMEOUT` or `SIGTERM` tries to abort its unfinished upload, but a
-stalled endpoint (the usual reason the limit is reached) may not answer that either,
-and a sync killed outright (`SIGKILL`, a crash, the host going down) cannot try. The
+stopped by `S3_SYNC_TIMEOUT`, or in the uploader by `docker stop`, tries to abort its
+unfinished upload, but a stalled endpoint (the usual reason the limit is reached) may
+not answer that either, and a sync killed outright (`SIGKILL`, a crash, the host going
+down, or in backup mode a sync still running when `docker stop` times out) cannot try. The
 parts then stay in the bucket, invisible to `list --s3` and billed until they are
 removed. Always set the provider's lifecycle rule "abort incomplete multipart uploads
 after N days" (1–7 days, for example).

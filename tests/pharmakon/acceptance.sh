@@ -183,4 +183,15 @@ fi
   || fail "off-site: the uploader holds a database password or the backup key"
 ok "off-site: every database's newest dump is in the bucket; the uploader has no database, no key, a read-only folder"
 
+# The uploader runs go-cron under tini, which passes docker stop's TERM to a running sync;
+# the stop ends cleanly (exit 0), well inside Docker's 10 s timeout, not by SIGKILL.
+[ "$("${COMPOSE[@]}" exec -T uploader cat /proc/1/comm)" = "tini" ] || fail "off-site: the uploader's PID 1 is not tini"
+started=$(date +%s)
+"${COMPOSE[@]}" stop uploader
+elapsed=$(( $(date +%s) - started ))
+[ "${elapsed}" -lt 10 ] || fail "off-site: stopping the uploader took ${elapsed}s (killed at the timeout?)"
+code="$(docker inspect -f '{{.State.ExitCode}}' "$("${COMPOSE[@]}" ps -aq uploader)")"
+[ "${code}" = "0" ] || fail "off-site: the stopped uploader exited ${code}"
+ok "off-site: the uploader's PID 1 is tini; docker compose stop ended it cleanly in ${elapsed}s"
+
 echo "════ Pharmakon acceptance: all checks passed"

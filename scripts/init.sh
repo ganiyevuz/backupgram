@@ -9,7 +9,10 @@ if [ "${BACKUPGRAM_MODE}" = "s3-sync" ]; then
     exit 1
   fi
   echo "Starting the off-site uploader (schedule: ${S3_SCHEDULE:-*/15 * * * *}, health check port: ${HEALTHCHECK_PORT})."
-  exec /usr/local/bin/go-cron -s "${S3_SCHEDULE:-*/15 * * * *}" -p "${HEALTHCHECK_PORT}" -- /scripts/s3-sync.sh
+  # go-cron never passes docker stop's TERM to its job; tini -g sends it to the whole
+  # process group, so a running s3-sync stops cleanly (it aborts its upload and records a
+  # failed sync). -s: a subreaper, for when tini is not PID 1 (compose init: true).
+  exec tini -s -g -- /usr/local/bin/go-cron -s "${S3_SCHEDULE:-*/15 * * * *}" -p "${HEALTHCHECK_PORT}" -- /scripts/s3-sync.sh
 fi
 
 # Prevalidate configuration (don't source)
