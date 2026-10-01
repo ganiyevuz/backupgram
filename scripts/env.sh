@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+# Off-site retention defaults to the container's own BACKUP_KEEP_*, taken before the REST
+# API overrides below: those may change BACKUP_KEEP_* but never an S3_* setting.
+# s3-env.sh validates and exports them.
+S3_KEEP_DAYS="${S3_KEEP_DAYS:-${BACKUP_KEEP_DAYS:-7}}"
+S3_KEEP_WEEKS="${S3_KEEP_WEEKS:-${BACKUP_KEEP_WEEKS:-4}}"
+S3_KEEP_MONTHS="${S3_KEEP_MONTHS:-${BACKUP_KEEP_MONTHS:-6}}"
+
 # Apply runtime config overrides written by the REST API (if present). These are
 # 'export KEY=...' lines, so sourcing makes them visible to backup.sh, restore.sh,
 # and the run-parts hooks. Values are single-quote-escaped by the API.

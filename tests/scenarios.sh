@@ -609,6 +609,23 @@ scenario_s3_settings_validated() {
   S3_SYNC_TIMEOUT="0" run_backup
   expect_rc 1 "a zero time limit"
   expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0 (got '0')."
+  # Off-site retention follows the container's own BACKUP_KEEP_*, never a REST API override of
+  # them: with BACKUP_KEEP_DAYS=0 inherited, a 2–5-day-old dump would not even be uploaded.
+  local old n
+  for n in 2 3 4 5; do
+    if [ "$(date -d "${n} days ago" +%u)" != 7 ] && [ "$(date -d "${n} days ago" +%d)" != 01 ]; then
+      old="$(date -d "${n} days ago" +%Y%m%d)-120000"
+      break
+    fi
+  done
+  head -c 2048 /dev/urandom > "${BACKUP_DIR}/daily/database-${old}.dump.gpg"
+  printf "export BACKUP_KEEP_DAYS='0'\n" > "${BACKUP_DIR}/.api-overrides.env"
+  sleep 1
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 0 "a run with BACKUP_KEEP_DAYS=0 set through the REST API"
+  grep -qxF "test/database/database-${old}.dump.gpg" <<< "$(s3_keys)" \
+    || fail "S3_KEEP_DAYS followed the REST API's BACKUP_KEEP_DAYS:\n$(s3_keys)"
+  rm -f "${BACKUP_DIR}/.api-overrides.env"
 }
 
 scenario_s3_uploader_mode() {
