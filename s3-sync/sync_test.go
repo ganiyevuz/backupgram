@@ -105,6 +105,32 @@ func TestRunSyncPrunes(t *testing.T) {
 	}
 }
 
+func TestRunSyncLeavesObjectsOutsideTheLayoutAlone(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
+	st := newFake()
+	st.objects["p/db/db-20261110-040000.dump.gpg"] = make([]byte, 10) // in the layout, expires: pruned
+	// Stamped, past retention (a Wednesday, age 83), but not at <prefix>/<db>/<name>: not ours to delete.
+	st.objects["p/x/y/old-20260902-040000.dump.gpg"] = make([]byte, 10)
+	var out, errOut bytes.Buffer
+	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
+	if !res.OK || res.Pruned != 1 {
+		t.Fatalf("result %+v\nerr %s", res, errOut.String())
+	}
+	if _, ok := st.objects["p/db/db-20261110-040000.dump.gpg"]; ok {
+		t.Error("the expired in-layout object survived")
+	}
+	if _, ok := st.objects["p/x/y/old-20260902-040000.dump.gpg"]; !ok {
+		t.Error("an object outside the layout was deleted")
+	}
+	if strings.Contains(out.String(), "old-20260902") {
+		t.Errorf("out mentions the foreign object: %s", out.String())
+	}
+	if len(res.Objects) != 1 || res.Objects[0].Key != "p/db/db-20261123-040000.dump.gpg" {
+		t.Errorf("objects after sync = %+v, want only the uploaded dump", res.Objects)
+	}
+}
+
 func TestRunSyncStatusRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
