@@ -2,19 +2,69 @@
 set -Eeo pipefail
 
 # List all backups with sizes and dates
-# Usage: list [database_name] [--cleanup-preview]
+# Usage: list [database_name] [--cleanup-preview] [--s3]
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 FILTER_DB=""
 CLEANUP_PREVIEW=false
+LIST_S3=false
 
 # Parse arguments
 for ARG in "$@"; do
   case "${ARG}" in
     --cleanup-preview) CLEANUP_PREVIEW=true ;;
+    --s3) LIST_S3=true ;;
     *) FILTER_DB="${ARG}" ;;
   esac
 done
+
+# Off-site listing: the bucket's dumps, per database, with the tier that keeps each.
+if [ "${LIST_S3}" = true ]; then
+  LIST_DIR="$(dirname "$(readlink -f "$0")")"
+  # shellcheck source=scripts/s3-env.sh
+  source "${LIST_DIR}/s3-env.sh"
+  # shellcheck source=scripts/lib/s3.sh
+  source "${LIST_DIR}/lib/s3.sh"
+  if ! s3_enabled; then
+    echo "❌ list --s3 needs S3_BUCKET and its credentials." >&2
+    exit 1
+  fi
+  S3_ARGS=(ls)
+  if [ -n "${FILTER_DB}" ]; then
+    S3_ARGS+=(--db "${FILTER_DB}")
+  fi
+  if ! LISTING="$(s3-sync "${S3_ARGS[@]}")"; then
+    echo "❌ Could not list $(s3_location)." >&2
+    exit 1
+  fi
+  # One box per database (keys are <prefix>/<db>/<name>, listed sorted). Columns of
+  # `s3-sync ls`: key, bytes (unused here), size, taken, tier.
+  TOTAL=0
+  CURRENT=""
+  while IFS=$'\t' read -r KEY _ SIZE TAKEN TIER; do
+    [ -n "${KEY}" ] || continue
+    DB="${KEY%/*}"
+    DB="${DB##*/}"
+    if [ "${DB}" != "${CURRENT}" ]; then
+      if [ -n "${CURRENT}" ]; then
+        echo "╚══════════════════════════════════════╝"
+        echo ""
+      fi
+      echo "╔══════════════════════════════════════╗"
+      echo "║  OFF-SITE ${DB}"
+      echo "╠══════════════════════════════════════╣"
+      CURRENT="${DB}"
+    fi
+    printf "║  %-6s  %s  %-8s %s\n" "${SIZE}" "${TAKEN}" "${TIER}" "${KEY}"
+    TOTAL=$((TOTAL + 1))
+  done <<< "${LISTING}"
+  if [ -n "${CURRENT}" ]; then
+    echo "╚══════════════════════════════════════╝"
+    echo ""
+  fi
+  echo "${TOTAL} off-site dump(s) in $(s3_location)"
+  exit 0
+fi
 
 if [ ! -d "${BACKUP_DIR}" ]; then
   echo "❌ Backup directory not found: ${BACKUP_DIR}" >&2

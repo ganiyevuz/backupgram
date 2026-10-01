@@ -699,6 +699,80 @@ scenario_s3_no_prune() {
   [ "$(s3_keys)" = "test/app/app-${old}.dump.gpg" ] || fail "an expired object was removed with S3_PRUNE=FALSE: $(s3_keys)"
 }
 
+scenario_s3_restore_from_bucket() {
+  fresh_backup_dir
+  s3_env
+  # A prefix with "cluster" in it: only a file NAME may mark a pg_dumpall dump, never the s3:// path.
+  export S3_PREFIX="cluster-copies"
+  local key
+  psql_su -d database -c "DROP TABLE IF EXISTS restore_probe" -c "CREATE TABLE restore_probe (id int)" \
+    -c "INSERT INTO restore_probe SELECT generate_series(1, 42)"
+  psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_s3 WITH (FORCE)"
+  export POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}"
+  run_backup
+  expect_rc 0 "backup with an off-site copy"
+  key="$(s3_keys)"
+  rm -rf "${BACKUP_DIR:?}"/*   # the server is lost: only the bucket remains
+
+  run_restore() {
+    set +e
+    RUN_OUT="$(bash "${RESTORE_SH}" "$@" < /dev/null 2>&1)"
+    RUN_RC=$?
+    set -e
+  }
+  run_restore --from-s3 database restored_s3
+  expect_rc 0 "restore the newest off-site dump"
+  [ "$(psql_su -d restored_s3 -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "rows from the newest dump"
+  psql_su -d postgres -c "DROP DATABASE restored_s3 WITH (FORCE)"
+  run_restore --from-s3 "${key}" restored_s3
+  expect_rc 0 "restore a given key"
+  [ "$(psql_su -d restored_s3 -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "rows from the given key"
+  BACKUP_ENCRYPTION_KEY="wrong" run_restore --from-s3 database restored_s3
+  expect_rc 1 "a wrong key"
+  expect_out "Could not read the backup"
+  run_restore --from-s3 nosuchdb
+  expect_rc 1 "a database with no off-site dump"
+  expect_out "nosuchdb: not found in s3://"
+  run_restore --from-s3 "cluster-copies/database/nosuch-20200101-000000.dump.gpg" restored_s3
+  expect_rc 1 "a missing key"
+  expect_out "not found in s3://"
+  [ -z "$(find /tmp -maxdepth 1 -name 'database-*.dump*' -print -quit)" ] || fail "a downloaded copy was written to /tmp"
+
+  # An unencrypted .sql.gz copy streams too.
+  fresh_backup_dir
+  s3_env
+  export S3_PREFIX="cluster-copies"
+  psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_s3 WITH (FORCE)"
+  POSTGRES_EXTRA_OPTS="-Z1" BACKUP_SUFFIX=".sql.gz" BACKUP_ENCRYPTION_KEY="" S3_ALLOW_UNENCRYPTED="TRUE" run_backup
+  expect_rc 0 "an unencrypted backup with an off-site copy"
+  BACKUP_ENCRYPTION_KEY="" run_restore --from-s3 database restored_s3
+  expect_rc 0 "restore an unencrypted off-site dump"
+  [ "$(psql_su -d restored_s3 -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "rows from the .sql.gz copy"
+  psql_su -d postgres -c "DROP DATABASE restored_s3 WITH (FORCE)"
+}
+
+scenario_s3_list() {
+  fresh_backup_dir
+  s3_env
+  local out
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 0 "backup with an off-site copy"
+  out="$(bash "${REPO_DIR}/scripts/list.sh" --s3)"
+  grep -q "OFF-SITE database" <<< "${out}" || fail "list --s3 lacks the database's box:\n${out}"
+  grep -q "test/database/database-" <<< "${out}" || fail "list --s3 lacks the dump:\n${out}"
+  grep -q "daily" <<< "${out}" || fail "list --s3 lacks the tier"
+  grep -q "^1 off-site dump(s) in s3://" <<< "${out}" || fail "list --s3 total:\n${out}"
+  out="$(bash "${REPO_DIR}/scripts/list.sh" --s3 nosuch)"
+  if grep -q "test/database/" <<< "${out}"; then fail "list --s3 nosuch shows another database"; fi
+  grep -q "^0 off-site dump(s)" <<< "${out}" || fail "list --s3 nosuch total:\n${out}"
+  set +e
+  RUN_OUT="$(env -u S3_BUCKET bash "${REPO_DIR}/scripts/list.sh" --s3 2>&1)"
+  RUN_RC=$?
+  set -e
+  expect_rc 1 "list --s3 without a bucket"
+  expect_out "list --s3 needs S3_BUCKET"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

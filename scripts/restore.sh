@@ -7,10 +7,13 @@ set -Eeo pipefail
 #   restore.sh /backups/last/mydb-20260416-143000.sql.gz.gpg
 #   restore.sh /backups/last/mydb-20260416-143000.sql.gz mydb_restored
 #   restore.sh /backups/daily/mydb-latest.sql.gz
+#   restore.sh --from-s3 <database|key> [target_database]
 
 # The real directory of this script: /restore.sh and /usr/local/bin/restore are symlinks.
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 source "${SCRIPT_DIR}/env.sh"
+# shellcheck source=scripts/lib/s3.sh
+source "${SCRIPT_DIR}/lib/s3.sh"
 
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 
@@ -32,6 +35,37 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
+
+# --- Restore from the off-site bucket ---
+# Usage: restore --from-s3 <database|key> [target_db]
+# A database name restores its newest off-site dump; a key (it contains a /) that dump.
+S3_KEY=""
+if [ "$1" = "--from-s3" ]; then
+  if [ -z "$2" ]; then
+    echo "❌ Usage: restore --from-s3 <database|key> [target_db]" >&2
+    exit 1
+  fi
+  if ! s3_enabled; then
+    echo "❌ restore --from-s3 needs S3_BUCKET and its credentials." >&2
+    exit 1
+  fi
+  if [[ "$2" == */* ]]; then
+    S3_KEY="$2"
+    if ! S3_LISTING="$(s3-sync ls)"; then
+      echo "❌ Could not list $(s3_location)." >&2
+      exit 1
+    fi
+    if ! S3_KEY="${S3_KEY}" awk -F'\t' '$1 == ENVIRON["S3_KEY"] { found = 1 } END { exit !found }' <<< "${S3_LISTING}"; then
+      echo "❌ ${S3_KEY}: not found in $(s3_location)." >&2
+      exit 1
+    fi
+  elif ! S3_KEY="$(s3-sync latest "$2")"; then
+    echo "❌ $2: not found in $(s3_location)." >&2
+    exit 1
+  fi
+  echo "☁️ Restoring from s3://${S3_BUCKET}/${S3_KEY}"
+  set -- "s3://${S3_BUCKET}/${S3_KEY}" "$3"
+fi
 
 # --- Restore directly from Telegram by message id ---
 # Usage: restore --from-telegram <message_id> [--chat <chat_id>] [target_db]
@@ -145,7 +179,7 @@ if [ -z "${BACKUP_FILE}" ]; then
   fi
 fi
 
-if [ ! -e "${BACKUP_FILE}" ]; then
+if [ -z "${S3_KEY}" ] && [ ! -e "${BACKUP_FILE}" ]; then
   echo "❌ Backup file not found: ${BACKUP_FILE}" >&2
   exit 1
 fi
@@ -184,6 +218,12 @@ fi
 
 RESTORE_FILE="${BACKUP_FILE}"
 
+# A pg_dumpall dump, told by the file name alone (never the folder, bucket or prefix).
+IS_CLUSTER="FALSE"
+if [[ "$(basename "${BACKUP_FILE}")" == *cluster* ]]; then
+  IS_CLUSTER="TRUE"
+fi
+
 # A decryption failure: the wrong key or a damaged file. Nothing was restored.
 unreadable_backup() {
   echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
@@ -216,10 +256,20 @@ if [[ "${RESTORE_FILE}" == *.gpg ]]; then
     STREAM_DECRYPT="TRUE"
   fi
 fi
+# An off-site dump always arrives as a stream.
+if [ -n "${S3_KEY}" ]; then
+  STREAM_DECRYPT="TRUE"
+fi
 
-# The backup's bytes on stdout: decrypted on the fly when encrypted.
+# The backup's bytes on stdout: from the bucket and/or decrypted on the fly.
 backup_stream() {
-  if [ "${STREAM_DECRYPT}" = "TRUE" ]; then
+  if [ -n "${S3_KEY}" ]; then
+    if [[ "${S3_KEY}" == *.gpg ]]; then
+      s3-sync get "${S3_KEY}" | gpg --batch --quiet --no-symkey-cache --decrypt --passphrase-file "${KEYFILE}"
+    else
+      s3-sync get "${S3_KEY}"
+    fi
+  elif [ "${STREAM_DECRYPT}" = "TRUE" ]; then
     gpg --batch --quiet --no-symkey-cache --decrypt --passphrase-file "${KEYFILE}" "${RESTORE_FILE}"
   else
     cat "${RESTORE_FILE}"
@@ -252,7 +302,7 @@ fi
 # Ensure the target database exists for per-database restores — plain pg_dump
 # output contains no CREATE DATABASE. Cluster dumps (pg_dumpall) restore into
 # 'postgres' and create their own databases, so they are skipped here.
-if ! echo "${BACKUP_FILE}" | grep -q "cluster"; then
+if [ "${IS_CLUSTER}" != "TRUE" ]; then
   # Escape single quotes so the name is an inert SQL string literal (no injection),
   # and pass it to createdb after `--` so a name starting with '-' can't be a flag.
   TARGET_DB_SQL=${TARGET_DB//\'/\'\'}
@@ -275,7 +325,7 @@ if [ -d "${RESTORE_FILE}" ]; then
 elif [[ "${RESTORE_NAME}" == *.sql.gz ]]; then
   # Compressed SQL dump — could be pg_dumpall (cluster) or pg_dump
   echo "📄 Detected compressed SQL dump."
-  if echo "${BACKUP_FILE}" | grep -q "cluster"; then
+  if [ "${IS_CLUSTER}" = "TRUE" ]; then
     echo "🌐 Cluster dump detected. Restoring all databases..."
     backup_stream | gunzip -c | psql -d postgres \
       || stream_failure "$?" "${PIPESTATUS[0]}" || exit $?

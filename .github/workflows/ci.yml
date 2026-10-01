@@ -231,6 +231,12 @@ jobs:
       - name: "Scenario: S3_PRUNE=FALSE"
         run: bash tests/scenarios.sh s3_no_prune
 
+      - name: "Scenario: restore --from-s3 after losing the server"
+        run: bash tests/scenarios.sh s3_restore_from_bucket
+
+      - name: "Scenario: list --s3"
+        run: bash tests/scenarios.sh s3_list
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"
