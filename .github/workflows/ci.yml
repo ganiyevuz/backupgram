@@ -119,6 +119,11 @@ jobs:
           echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-16
+          # The runner's own PostgreSQL 14 holds the default local cluster, so Ubuntu's
+          # pg_wrapper (/usr/bin/pg_restore, pg_dump, ...) runs the 14 tools whenever PGHOST
+          # is unset, and pg_restore 14 cannot read a 16 archive. The 16 tools come first,
+          # as in the image and the local harness.
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
 
       - name: Install scenario test tools (faketime, promtool, tini, go-cron)
         run: |
