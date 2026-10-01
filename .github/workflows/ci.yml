@@ -57,6 +57,14 @@ jobs:
   test-script:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    # The runner (a .NET process) starts every step with SIGPIPE ignored, and an ignored signal
+    # survives exec: a writer whose reader has gone then fails with EPIPE instead of dying of
+    # SIGPIPE, as it does in the container. env puts SIGPIPE back to its default before bash
+    # starts (bash cannot reset a signal ignored on entry). `bash -e {0}` is what these steps
+    # ran before (GitHub's default when no shell is named); only SIGPIPE changes.
+    defaults:
+      run:
+        shell: env --default-signal=PIPE bash -e {0}
     services:
       postgres:
         image: postgres:16
