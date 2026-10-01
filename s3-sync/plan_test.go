@@ -42,6 +42,42 @@ func TestPlanUploads(t *testing.T) {
 	}
 }
 
+// A backlog goes up newest first, so a sync cut short by S3_SYNC_TIMEOUT has sent the
+// newest copies; equal stamps go by database, then by name.
+func TestPlanUploadsNewestFirst(t *testing.T) {
+	now := at(2026, 11, 24, 12)
+	file := func(name, db string, stamp time.Time) LocalFile {
+		return LocalFile{Name: name, Path: "/x/" + name, DB: db, Stamp: stamp, Size: 10}
+	}
+	files := []LocalFile{
+		file("beta-20261121-040000.dump.gpg", "beta", at(2026, 11, 21, 4)),
+		file("alpha-20261123-040000.sql.gz.gpg", "alpha", at(2026, 11, 23, 4)),
+		file("gamma-20261122-040000.dump.gpg", "gamma", at(2026, 11, 22, 4)),
+		file("beta-20261123-040000.dump.gpg", "beta", at(2026, 11, 23, 4)),
+		file("alpha-20261121-040000.dump.gpg", "alpha", at(2026, 11, 21, 4)),
+		file("alpha-20261123-040000.dump.gpg", "alpha", at(2026, 11, 23, 4)),
+		file("gamma-20261124-040000.dump.gpg", "gamma", at(2026, 11, 24, 4)),
+	}
+	live := map[string]bool{"alpha": true, "beta": true, "gamma": true}
+	uploads, present := PlanUploads(files, nil, "p", true, newKeeper(policy, now, live, files, nil))
+	var got []string
+	for _, u := range uploads {
+		got = append(got, u.File.Name)
+	}
+	want := []string{
+		"gamma-20261124-040000.dump.gpg",
+		"alpha-20261123-040000.dump.gpg",
+		"alpha-20261123-040000.sql.gz.gpg",
+		"beta-20261123-040000.dump.gpg",
+		"gamma-20261122-040000.dump.gpg",
+		"alpha-20261121-040000.dump.gpg",
+		"beta-20261121-040000.dump.gpg",
+	}
+	if !reflect.DeepEqual(got, want) || present != 0 {
+		t.Errorf("uploads %v present %d\nwant    %v present 0", got, present, want)
+	}
+}
+
 func TestPlanPrune(t *testing.T) {
 	now := at(2026, 11, 24, 12)
 	objects := []RemoteObject{

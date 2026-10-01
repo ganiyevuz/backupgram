@@ -82,7 +82,8 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   new or wrong folder); `S3_PRUNE=FALSE` makes it upload only (for write-only
   credentials and object lock). Each sync stops at `S3_SYNC_TIMEOUT` (default 3600 s)
   and counts as failed, so a stalled endpoint holds up the backups (their lock) for at
-  most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload).
+  most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload); a
+  backlog goes up newest first, so the newest copy arrives before the time limit.
   Unencrypted dumps stay local unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are
   not uploaded. Off-site problems never change a backup run's exit code.
   `restore --from-s3 <db|key>` streams a dump from the bucket into the restore, and

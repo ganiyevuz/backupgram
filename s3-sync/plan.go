@@ -69,7 +69,9 @@ func (k keeper) keeps(db string, stamp time.Time) bool {
 
 // PlanUploads returns the local dumps whose key is missing from the bucket or holds a
 // different size, and how many are already there. With pruning on, a dump the policy
-// would delete straight away is not uploaded.
+// would delete straight away is not uploaded. The uploads go newest first (then by
+// database and name), so a backlog that S3_SYNC_TIMEOUT cuts short sends the newest
+// copies first.
 func PlanUploads(files []LocalFile, remote map[string]int64, prefix string, prune bool, k keeper) ([]Upload, int) {
 	var uploads []Upload
 	present := 0
@@ -84,6 +86,16 @@ func PlanUploads(files []LocalFile, remote map[string]int64, prefix string, prun
 		}
 		uploads = append(uploads, Upload{File: f, Key: key})
 	}
+	sort.Slice(uploads, func(i, j int) bool {
+		a, b := uploads[i].File, uploads[j].File
+		if !a.Stamp.Equal(b.Stamp) {
+			return a.Stamp.After(b.Stamp)
+		}
+		if a.DB != b.DB {
+			return a.DB < b.DB
+		}
+		return a.Name < b.Name
+	})
 	return uploads, present
 }
 

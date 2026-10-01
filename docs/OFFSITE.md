@@ -33,7 +33,8 @@ The off-site copy is added on top, and only dumps leave the server:
   failed and is retried on the next sync. A key that exists with a different size (an
   interrupted or replaced upload) is uploaded again. Each sync has a time limit
   (`S3_SYNC_TIMEOUT`), so a stalled endpoint holds up the backups (their lock) for at
-  most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload).
+  most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload). A
+  backlog goes up newest first, so the newest copy arrives before the time limit.
 - `list --s3` and `restore --from-s3` read straight from the bucket.
 
 Only an object at exactly `<S3_PREFIX>/<db>/<file>` with a stamped file name
