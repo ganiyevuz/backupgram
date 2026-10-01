@@ -224,9 +224,32 @@ if [[ "$(basename "${BACKUP_FILE}")" == *cluster* ]]; then
   IS_CLUSTER="TRUE"
 fi
 
-# A decryption failure: the wrong key or a damaged file. Nothing was restored.
+# Whether this run created the target database, and whether the restore into it has begun.
+CREATED_DB="FALSE"
+RESTORING="FALSE"
+
+# The backup could not be read: the wrong key, a damaged file, or (off-site) a download cut
+# off. A stream that failed part-way may have restored part of the dump: a database this run
+# created is dropped again; one that existed is left, with a warning.
 unreadable_backup() {
-  echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
+  if [ -n "${S3_KEY}" ]; then
+    echo "❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object)." >&2
+  else
+    echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
+  fi
+  if [ "${RESTORING}" = "TRUE" ]; then
+    if [ "${IS_CLUSTER}" = "TRUE" ]; then
+      echo "⚠️ The cluster may be partially restored: check its databases before retrying." >&2
+    elif [ "${CREATED_DB}" = "TRUE" ]; then
+      if dropdb -- "${TARGET_DB}"; then
+        echo "🗑️ Dropped '${TARGET_DB}', which this restore had created."
+      else
+        echo "⚠️ Could not drop '${TARGET_DB}': it may be partially restored, drop it before retrying." >&2
+      fi
+    else
+      echo "⚠️ '${TARGET_DB}' may be partially restored: drop it before retrying." >&2
+    fi
+  fi
   exit 1
 }
 
@@ -309,12 +332,14 @@ if [ "${IS_CLUSTER}" != "TRUE" ]; then
   if ! psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '${TARGET_DB_SQL}'" | grep -q 1; then
     echo "📦 Target database '${TARGET_DB}' does not exist — creating it..."
     createdb -- "${TARGET_DB}"
+    CREATED_DB="TRUE"
   fi
 fi
 
 # Step 3: Restore based on format
 echo "🔄 Restoring ${TARGET_DB}..."
 RESTORE_START=$(date +%s)
+RESTORING="TRUE"
 
 if [ -d "${RESTORE_FILE}" ]; then
   # Directory format backup

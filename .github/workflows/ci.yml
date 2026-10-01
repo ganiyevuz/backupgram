@@ -237,6 +237,9 @@ jobs:
       - name: "Scenario: list --s3"
         run: bash tests/scenarios.sh s3_list
 
+      - name: "Scenario: an interrupted restore --from-s3"
+        run: bash tests/scenarios.sh s3_restore_interrupted
+
       - name: Test pg_dump backup
         run: |
           rm -rf "$BACKUP_DIR" && mkdir -p "$BACKUP_DIR"

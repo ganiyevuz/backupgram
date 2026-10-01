@@ -430,8 +430,9 @@ scenario_restore_wrong_key_sql() {
     set -e
     expect_rc 1 "${kind}: restore with the wrong key"
     expect_out "Could not read the backup"
-    got="$(psql_su -d restored_sql -tAc "SELECT coalesce(to_regclass('restore_probe')::text, 'none')")"
-    [ "${got}" = "none" ] || fail "${kind}: the failed restore loaded data: ${got}"
+    # The failed restore created the database, so it dropped it again: nothing was loaded.
+    got="$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_sql'")"
+    [ "${got}" = "0" ] || fail "${kind}: the failed restore left the database it created"
     set +e
     RUN_OUT="$(BACKUP_ENCRYPTION_KEY="${TRICKY_KEY}" bash "${RESTORE_SH}" "${file}" restored_sql < /dev/null 2>&1)"
     RUN_RC=$?
@@ -799,6 +800,54 @@ SH
   expect_rc 0 "restore an unencrypted off-site dump"
   [ "$(psql_su -d restored_s3 -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "rows from the .sql.gz copy"
   psql_su -d postgres -c "DROP DATABASE restored_s3 WITH (FORCE)"
+}
+
+# A download cut off mid-stream: a database this restore created is dropped again; one that
+# already existed is left alone, with a warning that it may be partially restored.
+scenario_s3_restore_interrupted() {
+  fresh_backup_dir
+  s3_env
+  local shims
+  psql_su -d database -c "DROP TABLE IF EXISTS cut_probe" \
+    -c "CREATE TABLE cut_probe AS SELECT g AS id, md5(g::text) AS v FROM generate_series(1, 100000) g"
+  psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_cut WITH (FORCE)"
+  POSTGRES_EXTRA_OPTS="-Z1" BACKUP_SUFFIX=".sql.gz" BACKUP_ENCRYPTION_KEY="" S3_ALLOW_UNENCRYPTED="TRUE" run_backup
+  expect_rc 0 "an unencrypted backup with an off-site copy"
+  # A shim ahead of the real s3-sync: `get` passes the object's first 8 KiB, then fails.
+  shims="$(mktemp -d)"
+  cat > "${shims}/s3-sync" <<'SH'
+#!/bin/sh
+PATH="${PATH#"${SHIM_DIR}":}"
+if [ "$1" = "get" ]; then
+  s3-sync "$@" | head -c 8192
+  exit 1
+fi
+exec s3-sync "$@"
+SH
+  chmod +x "${shims}/s3-sync"
+  cut_restore() {
+    set +e
+    RUN_OUT="$(PATH="${shims}:${PATH}" SHIM_DIR="${shims}" BACKUP_ENCRYPTION_KEY="" \
+      bash "${RESTORE_SH}" --from-s3 database restored_cut < /dev/null 2>&1)"
+    RUN_RC=$?
+    set -e
+    printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
+  }
+  cut_restore
+  expect_rc 1 "a download cut off, into a new database"
+  expect_out "❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object)."
+  [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "0" ] \
+    || fail "the database this restore created was not dropped"
+  psql_su -d postgres -c "CREATE DATABASE restored_cut"
+  cut_restore
+  expect_rc 1 "a download cut off, into an existing database"
+  expect_out "❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object)."
+  expect_out "⚠️ 'restored_cut' may be partially restored: drop it before retrying."
+  [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "1" ] \
+    || fail "a database the restore did not create was dropped"
+  psql_su -d postgres -c "DROP DATABASE restored_cut WITH (FORCE)"
+  psql_su -d database -c "DROP TABLE cut_probe"
+  rm -rf "${shims}"
 }
 
 scenario_s3_list() {
