@@ -313,11 +313,14 @@ backup_stream() {
 # restore reads the backup: the stream (cat, gpg or s3-sync get) and gunzip.
 # - One of them failing means the backup could not be read: exit 1 with a clear message.
 #   That catches a damaged encrypted dump (gpg's integrity check) and a damaged .sql.gz
-#   (gzip's checksum); a damaged unencrypted custom-format or plain .sql dump shows only
-#   as pg_restore / psql errors.
+#   (gzip's checksum); damage in an unencrypted custom-format, tar or plain .sql stream
+#   shows as pg_restore / psql errors, or as the stop below.
 # - Else, one killed by SIGPIPE (141) means the restore stopped before it read the whole
 #   backup: exit 1 too, with the same cleanup. gpg ignores SIGPIPE and exits 2 instead, so
 #   an encrypted stream whose restore stopped first reads as "Could not read the backup".
+#   pg_restore never reads a tar archive's tail (restore.sql and the end blocks), so the
+#   tar branch below reads the rest of the stream after pg_restore: a complete restore is
+#   never taken for a stop, and gpg still reaches its integrity check.
 # - Else the restore's own failure is returned, for the caller to treat as fatal or as a
 #   warning.
 stream_failure() {
@@ -391,8 +394,19 @@ elif [[ "${RESTORE_NAME}" == *.sql ]]; then
   echo "📄 Detected plain SQL dump."
   backup_stream | psql -d "${TARGET_DB}" \
     || stream_failure "$?" "${PIPESTATUS[@]}" || exit $?
+elif [ "${STREAM_DECRYPT}" = "TRUE" ] && [[ "${RESTORE_NAME}" == *.tar ]]; then
+  # Tar archive from gpg or the bucket: pg_restore leaves its tail unread (see
+  # stream_failure), so the rest is read after it and pg_restore's status is kept.
+  echo "📦 Attempting pg_restore (archive format)..."
+  backup_stream | (
+    if pg_restore -d "${TARGET_DB}" --clean --if-exists 2>&1; then rc=0; else rc=$?; fi
+    cat >/dev/null
+    exit "${rc}"
+  ) \
+    || stream_failure "$?" "${PIPESTATUS[@]}" \
+    || echo "⚠️ pg_restore completed with warnings."
 elif [ "${STREAM_DECRYPT}" = "TRUE" ]; then
-  # Encrypted archive (custom format): decrypt straight into pg_restore
+  # Custom-format archive from gpg or the bucket, straight into pg_restore
   echo "📦 Attempting pg_restore (archive format)..."
   backup_stream | pg_restore -d "${TARGET_DB}" --clean --if-exists 2>&1 \
     || stream_failure "$?" "${PIPESTATUS[@]}" \

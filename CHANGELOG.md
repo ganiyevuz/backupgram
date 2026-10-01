@@ -48,9 +48,14 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   archive, a lost connection) exits 1 with `❌ The restore stopped before it read the
   whole backup (see the errors above).` instead of reporting success. In each case a
   target database the restore created is dropped again, and an existing one gets
-  `⚠️ '<db>' may be partially restored: drop it before retrying.` A damaged unencrypted
-  custom-format or plain `.sql` dump still shows only as `pg_restore` / `psql` errors.
-  The target name derived from the file name also strips a trailing `.dump`.
+  `⚠️ '<db>' may be partially restored: drop it before retrying.` Both apply to streamed
+  restores: everything except local unencrypted custom-format and tar files and directory
+  dumps. A streamed tar archive is read to its end, since `pg_restore` never reads its
+  tail. Damage in a local unencrypted custom-format file, any unencrypted tar dump, or an
+  unencrypted plain `.sql` dump still shows only as `pg_restore` / `psql` errors; an
+  unencrypted custom-format object from the bucket that `pg_restore` rejects before its
+  end fails with the stopped-early line. The target name derived from the file name
+  also strips a trailing `.dump`.
 - `BACKUP_LATEST_TYPE=hardlink` pointed the `-latest` link at a path relative to the
   working directory.
 - Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer

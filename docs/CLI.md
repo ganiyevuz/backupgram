@@ -74,19 +74,28 @@ handles GPG decryption automatically. The target database name is taken from the
 file name (trailing `.gpg`, `.gz`, `.tar`, `.sql`, `.dump` and the date or
 `-latest` are stripped) unless you pass it.
 
-Encrypted dumps stream into the restore (custom-format, `.sql` and `.sql.gz`):
-nothing is decrypted to disk, and the key is passed through a temporary passphrase
-file, never on a command line. A wrong `BACKUP_ENCRYPTION_KEY` or a damaged file
-exits `1` with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
-damaged file).` Damage is caught in encrypted dumps (gpg's integrity check) and in
-gzip SQL dumps (`.sql.gz`, gzip's checksum), encrypted or not; a damaged unencrypted
-custom-format or plain `.sql` dump shows only as `pg_restore` / `psql` errors in the
-output. A restore that stops before it has read the whole stream (`pg_restore`
-refusing the archive, a lost connection) exits `1` with `❌ The restore stopped before
-it read the whole backup (see the errors above).` A wrong key fails before anything is
-restored; a damaged file can fail part-way. In each case, a target database the restore
-created is dropped again, and an existing one gets `⚠️ '<db>' may be partially
-restored: drop it before retrying.`
+Restores stream: the backup is piped into `psql` or `pg_restore`, and an encrypted one is
+decrypted on the way, never to disk, with the key passed through a temporary passphrase
+file, never on a command line. The exceptions are local unencrypted custom-format and tar
+files and directory dumps, which `pg_restore` reads itself. In a streamed restore:
+
+- A wrong `BACKUP_ENCRYPTION_KEY` or a damaged file exits `1` with `❌ Could not read
+  the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file).` Damage is caught in
+  encrypted dumps (gpg's integrity check) and in gzip SQL dumps (`.sql.gz`, gzip's
+  checksum), encrypted or not.
+- A restore that stops before it has read the whole stream (`pg_restore` refusing the
+  archive, a lost connection) exits `1` with `❌ The restore stopped before it read the
+  whole backup (see the errors above).` A tar archive is always read to its end
+  (`pg_restore` never reads its tail), so a tar dump that `pg_restore` refuses ends with
+  `⚠️ pg_restore completed with warnings.` instead.
+- A wrong key fails before anything is restored; a damaged file can fail part-way. In
+  each case, a target database the restore created is dropped again, and an existing one
+  gets `⚠️ '<db>' may be partially restored: drop it before retrying.`
+
+Other damage shows only as `pg_restore` / `psql` errors in the output: in an
+unencrypted custom-format dump read from a local file, an unencrypted tar dump, or an
+unencrypted plain `.sql` dump. (An unencrypted custom-format object from the bucket that
+`pg_restore` rejects before its end fails with the stopped-early line.)
 
 ```sh
 # Interactive mode -- pick from a numbered list
@@ -135,11 +144,14 @@ The object streams from the bucket through `gpg` into the restore: nothing in cl
 text is written to disk. Exit `1` when the database or key is not found in the bucket
 (`❌ <name>: not found in s3://<bucket>/<prefix>.`, nothing restored) or when the
 stream fails (`❌ Could not read the backup (download interrupted, wrong
-BACKUP_ENCRYPTION_KEY, or a damaged object).`). A damaged object is caught when it is
-encrypted (gpg's integrity check) or a `.sql.gz` (gzip's checksum); a damaged
-unencrypted custom-format or plain `.sql` dump shows only as `pg_restore` / `psql`
-errors in the output. A wrong key fails before anything is restored, but a download
-cut off part-way may already have restored part of the dump:
+BACKUP_ENCRYPTION_KEY, or a damaged object).`) or stops before its end (`❌ The
+restore stopped before it read the whole backup (see the errors above).`); the rules
+are those of a streamed restore above. A damaged object is caught when it is encrypted
+(gpg's integrity check) or a `.sql.gz` (gzip's checksum), and an unencrypted
+custom-format one when `pg_restore` rejects it before its end; damage in an unencrypted
+tar or plain `.sql` object shows only as `pg_restore` / `psql` errors in the output. A
+wrong key fails before anything is restored, but a download cut off part-way may
+already have restored part of the dump:
 a target database the restore created is then dropped again, and an existing one is
 left with `⚠️ '<db>' may be partially restored: drop it before retrying.` Drop it, or
 restore under another name, before you retry.

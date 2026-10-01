@@ -206,6 +206,9 @@ jobs:
       - name: "Scenario: wrong key on an encrypted SQL dump"
         run: bash tests/scenarios.sh restore_wrong_key_sql
 
+      - name: "Scenario: streamed tar restores whose tail pg_restore never reads"
+        run: bash tests/scenarios.sh restore_tar_archive
+
       - name: "Scenario: no error hook on a successful run"
         run: bash tests/scenarios.sh error_hook_not_fired_on_success
 

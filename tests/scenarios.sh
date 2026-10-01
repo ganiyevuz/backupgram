@@ -443,6 +443,53 @@ scenario_restore_wrong_key_sql() {
   psql_su -d postgres -c "DROP DATABASE restored_sql WITH (FORCE)"
 }
 
+# A tar archive ends with restore.sql and the end blocks, which pg_restore never reads. With
+# 300 tables that tail is far over the 64 KiB a pipe holds, so the stream's producer (gpg, or
+# s3-sync get) must not be cut off: a complete streamed restore is a success, encrypted and
+# local, or unencrypted from the bucket.
+scenario_restore_tar_archive() {
+  fresh_backup_dir
+  s3_env
+  local file key count
+  psql_su -d postgres -c "DROP DATABASE IF EXISTS wide WITH (FORCE)" \
+    -c "DROP DATABASE IF EXISTS wide_r WITH (FORCE)" -c "CREATE DATABASE wide"
+  psql_su -d wide \
+    -c "DO \$\$ BEGIN FOR i IN 1..300 LOOP EXECUTE format('CREATE TABLE t%s (id int)', i); END LOOP; END \$\$" \
+    -c "INSERT INTO t300 SELECT generate_series(1, 42)"
+  export POSTGRES_DB="wide" POSTGRES_EXTRA_OPTS="-Ft" BACKUP_SUFFIX=".tar"
+  BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 0 "an encrypted tar backup"
+  file="$(only_file "${BACKUP_DIR}/last" 'wide-[0-9]*.tar.gpg')"
+  restored_tables() {
+    psql_su -d wide_r -tAc "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname = 'public') || ' ' || (SELECT count(*) FROM t300)"
+  }
+  set +e
+  RUN_OUT="$(BACKUP_ENCRYPTION_KEY="k" bash "${RESTORE_SH}" "${file}" wide_r < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  printf '%s\n' "${RUN_OUT}" | tail -n 6 | sed 's/^/    │ /'
+  expect_rc 0 "a local encrypted tar restore"
+  expect_out "✅ Restore completed"
+  count="$(restored_tables || true)"
+  [ "${count}" = "300 42" ] || fail "the encrypted tar restore left tables and rows: ${count}"
+  psql_su -d postgres -c "DROP DATABASE wide_r WITH (FORCE)"
+  # The same schema as an unencrypted tar object in the bucket.
+  sleep 1
+  BACKUP_ENCRYPTION_KEY="" S3_ALLOW_UNENCRYPTED="TRUE" run_backup
+  expect_rc 0 "an unencrypted tar backup with an off-site copy"
+  key="$(s3_keys | grep '\.tar$')"
+  set +e
+  RUN_OUT="$(BACKUP_ENCRYPTION_KEY="" bash "${RESTORE_SH}" --from-s3 "${key}" wide_r < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  printf '%s\n' "${RUN_OUT}" | tail -n 6 | sed 's/^/    │ /'
+  expect_rc 0 "an unencrypted tar restore from the bucket"
+  expect_out "✅ Restore completed"
+  count="$(restored_tables || true)"
+  [ "${count}" = "300 42" ] || fail "the tar restore from the bucket left tables and rows: ${count}"
+  psql_su -d postgres -c "DROP DATABASE wide_r WITH (FORCE)" -c "DROP DATABASE wide WITH (FORCE)"
+}
+
 # Pharmakon's backup-runner restores one branch: gpg --decrypt | pg_restore -n br<nn>.
 scenario_pharmakon_branch_restore() {
   load_pharmakon_fixture
