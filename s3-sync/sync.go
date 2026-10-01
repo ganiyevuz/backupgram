@@ -18,11 +18,14 @@ type Settings struct {
 }
 
 // Result counts one sync's work. OK is false when an eligible upload failed or the
-// bucket could not be listed. Objects is the bucket's stamped dumps after the sync.
+// bucket could not be listed. Objects is the bucket's stamped dumps after the sync, and
+// Newest what the status file reports (see NewestLive); both are nil when the bucket could
+// not be listed after the sync.
 type Result struct {
 	Uploaded, Present, Failed, Pruned int
 	OK                                bool
 	Objects                           []RemoteObject
+	Newest                            []RemoteObject
 }
 
 // RunSync uploads the dumps of dir the bucket lacks, prunes the bucket, and lists it
@@ -92,6 +95,7 @@ func RunSync(ctx context.Context, st Storage, s Settings, dir string, now time.T
 		res.OK = false
 	} else {
 		res.Objects = stampedObjects(s.Prefix, final)
+		res.Newest = NewestLive(live, res.Objects)
 	}
 	fmt.Fprintf(out, "☁️ Off-site %s: %d uploaded, %d already there, %d failed, %d pruned.\n",
 		s.Location, res.Uploaded, res.Present, res.Failed, res.Pruned)

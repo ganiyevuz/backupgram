@@ -568,11 +568,20 @@ scenario_s3_upload_failure_is_a_warning() {
 scenario_s3_refuses_unencrypted() {
   fresh_backup_dir
   s3_env
+  local dir
+  dir="$(mktemp -d)"
   export POSTGRES_EXTRA_OPTS="-Z1"
-  run_backup
+  METRICS_TEXTFILE_DIR="${dir}" run_backup
   expect_rc 0 "an unencrypted backup"
   expect_out "not encrypted; not uploaded (S3_ALLOW_UNENCRYPTED=FALSE)."
   [ -z "$(s3_keys)" ] || fail "an unencrypted dump was uploaded"
+  # A live database with no off-site copy reads as timestamp 0, so BackupgramOffsiteTooOld fires.
+  grep -qx 'backupgram_offsite_last_timestamp_seconds{project="CI Test",database="database"} 0' \
+    "${dir}/backupgram-CI_Test.prom" || fail "a live database without a copy must show timestamp 0:\n$(cat "${dir}/backupgram-CI_Test.prom")"
+  grep -qx 'backupgram_offsite_last_size_bytes{project="CI Test",database="database"} 0' \
+    "${dir}/backupgram-CI_Test.prom" || fail "a live database without a copy must show size 0"
+  promtool check metrics < "${dir}/backupgram-CI_Test.prom" || fail "promtool rejects the metrics"
+  rm -rf "${dir}"
   sleep 1
   S3_ALLOW_UNENCRYPTED="TRUE" run_backup
   expect_rc 0 "unencrypted uploads allowed"

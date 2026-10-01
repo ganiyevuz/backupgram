@@ -66,7 +66,7 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "The newest off-site {{ $labels.project }} {{ $labels.database }} dump is {{ $value | humanizeDuration }} old"
-          description: "The local backup may be fine; the copy to the bucket is not keeping up. Check the sync's log."
+          description: "The local backup may be fine; the copy to the bucket is not keeping up. An age of decades means the bucket holds no copy at all (unencrypted dumps with S3_ALLOW_UNENCRYPTED=FALSE, or directory dumps). Check the sync's log."
 
       - alert: BackupgramOffsiteSyncFailed
         expr: backupgram_offsite_sync_success == 0

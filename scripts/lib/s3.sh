@@ -21,20 +21,27 @@ s3_location() {
 }
 
 # One sync: upload what the bucket lacks, prune it, write the status file. 0 = ok.
+# A sync that ends without writing its status (killed, or it could not) leaves a failed one.
 s3_sync() {
   rm -f "${S3_STATUS_FILE}"
-  s3-sync sync --dir "${BACKUP_DIR}" --status "${S3_STATUS_FILE}"
+  if s3-sync sync --dir "${BACKUP_DIR}" --status "${S3_STATUS_FILE}"; then
+    return 0
+  fi
+  if [ ! -e "${S3_STATUS_FILE}" ]; then
+    printf 'result failed %s\n' "$(date +%s)" > "${S3_STATUS_FILE}" || true
+  fi
+  return 1
 }
 
-# The off-site metrics, from the status file. Without one (s3-sync could not write it),
-# only a failed sync, timed now. Each family's HELP/TYPE comes right before its samples.
+# The off-site metrics, from the status file; none before this container's first sync (an
+# early abort then reports no off-site state rather than a failed sync). Each family's
+# HELP/TYPE comes right before its samples.
 render_offsite_metrics() {
   local l result="" finished="" newest="" db stamp bytes
+  [ -r "${S3_STATUS_FILE}" ] || return 0
   l="project=\"$(prom_escape "${PROJECT_NAME}")\""
-  if [ -r "${S3_STATUS_FILE}" ]; then
-    read -r _ result finished < <(grep '^result ' "${S3_STATUS_FILE}" || true) || true
-    newest="$(grep '^newest ' "${S3_STATUS_FILE}" || true)"
-  fi
+  read -r _ result finished < <(grep '^result ' "${S3_STATUS_FILE}" || true) || true
+  newest="$(grep '^newest ' "${S3_STATUS_FILE}" || true)"
   prom_header backupgram_offsite_last_timestamp_seconds "When the newest off-site dump of the database was taken (Unix time)."
   while read -r _ db stamp bytes _; do
     if [ -n "${db}" ]; then

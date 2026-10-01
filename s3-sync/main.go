@@ -79,7 +79,7 @@ func cmdSync(ctx context.Context, args []string, env Env, st Storage, out, errOu
 		res.OK = false
 	}
 	if *status != "" {
-		if err := WriteStatus(*status, res.OK, now(), res.Objects); err != nil {
+		if err := WriteStatus(*status, res.OK, now(), res.Newest); err != nil {
 			fmt.Fprintf(errOut, "⚠️ off-site: cannot write %s (%v).\n", *status, err)
 			return 1
 		}

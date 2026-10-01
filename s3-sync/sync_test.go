@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -138,7 +139,7 @@ func TestRunSyncStatusRoundTrip(t *testing.T) {
 	var out, errOut bytes.Buffer
 	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
 	path := filepath.Join(t.TempDir(), "status")
-	if err := WriteStatus(path, res.OK, at(2026, 11, 24, 12), res.Objects); err != nil {
+	if err := WriteStatus(path, res.OK, at(2026, 11, 24, 12), res.Newest); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
@@ -170,5 +171,48 @@ func TestRunSyncSkipsPruneWithoutLocalDumps(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "removed") {
 		t.Errorf("out = %s", out.String())
+	}
+}
+
+// Newest covers the live databases only: the newest object of each, or an empty Key when
+// the bucket holds none of its dumps.
+func TestRunSyncNewestCoversLiveDatabases(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
+	writeFile(t, filepath.Join(dir, "last", "plain-20261123-040000.sql.gz"), 7) // not encrypted: never uploaded
+	st := newFake()
+	st.objects["p/db/db-20261122-040000.dump.gpg"] = make([]byte, 8)
+	st.objects["p/gone/gone-20261122-040000.dump.gpg"] = make([]byte, 8) // not live
+	var out, errOut bytes.Buffer
+	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
+	if !res.OK {
+		t.Fatalf("result %+v\nerr %s", res, errOut.String())
+	}
+	want := []RemoteObject{
+		{Key: "p/db/db-20261123-040000.dump.gpg", Size: 10, DB: "db", Stamp: at(2026, 11, 23, 4)},
+		{DB: "plain"},
+	}
+	if !reflect.DeepEqual(res.Newest, want) {
+		t.Errorf("newest = %+v, want %+v", res.Newest, want)
+	}
+}
+
+func TestRunSyncFinalListingFailure(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
+	st := newFake()
+	st.listHook = func(_ context.Context, call int) error {
+		if call == 2 {
+			return errors.New("connection reset")
+		}
+		return nil
+	}
+	var out, errOut bytes.Buffer
+	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
+	if res.OK || res.Uploaded != 1 || res.Newest != nil {
+		t.Errorf("result %+v, want failed with no newest", res)
+	}
+	if !strings.Contains(errOut.String(), "⚠️ off-site: cannot list s3://b/p after the sync (connection reset).") {
+		t.Errorf("stderr = %s", errOut.String())
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,50 @@ func TestRunSyncStopsAtTheTimeLimit(t *testing.T) {
 	}
 	if !strings.HasPrefix(string(raw), "result failed ") {
 		t.Errorf("status after a stopped sync = %q", raw)
+	}
+}
+
+// The status file's newest lines cover the live databases only, and none when the bucket
+// could not be listed after the sync.
+func TestRunSyncCommandNewestLines(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
+	writeFile(t, filepath.Join(dir, "last", "plain-20261123-040000.sql.gz"), 7) // live, never uploaded
+	status := filepath.Join(t.TempDir(), "status")
+	st := newFake()
+	st.objects["p/gone/gone-20261122-040000.dump.gpg"] = make([]byte, 4) // in the bucket, not live
+	env := baseEnv()
+	env["S3_PREFIX"] = "p"
+	if code, _, errOut := runWith(t, st, env, "sync", "--dir", dir, "--status", status); code != 0 {
+		t.Fatalf("sync: exit %d\n%s", code, errOut)
+	}
+	raw, err := os.ReadFile(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "result ok 1795521600\n" +
+		"newest db 1795406400 10 p/db/db-20261123-040000.dump.gpg\n" +
+		"newest plain 0 0 -\n"
+	if string(raw) != want {
+		t.Errorf("status =\n%s\nwant\n%s", raw, want)
+	}
+
+	st.lists = 0
+	st.listHook = func(_ context.Context, call int) error {
+		if call == 2 { // the listing after the uploads
+			return errors.New("connection reset")
+		}
+		return nil
+	}
+	if code, _, _ := runWith(t, st, env, "sync", "--dir", dir, "--status", status); code != 1 {
+		t.Errorf("a failed final listing: exit %d, want 1", code)
+	}
+	raw, err = os.ReadFile(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "result failed 1795521600\n" {
+		t.Errorf("status after a failed final listing = %q, want no newest lines", raw)
 	}
 }
 
