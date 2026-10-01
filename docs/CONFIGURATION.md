@@ -294,18 +294,18 @@ for endpoints, the runtime-config whitelist, and the security model.
 | `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers; empty inherits the container's `BACKUP_KEEP_*` |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only, never delete from the bucket |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix |
-| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (> 0); a sync that reaches it stops, counts as failed and is retried on the next run. Raise it when large dumps go over a slow link. A sync stopped by the limit or by `SIGTERM` tries to abort its unfinished upload, which a stalled endpoint may not answer and a sync killed outright cannot do: set the bucket's lifecycle rule "abort incomplete multipart uploads after N days" ([OFFSITE.md](OFFSITE.md#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds from 1 to 999999999; a sync that reaches it stops, counts as failed and is retried on the next run. Raise it when large dumps go over a slow link. A sync stopped by the limit or by `SIGTERM` tries to abort its unfinished upload, which a stalled endpoint may not answer and a sync killed outright cannot do: set the bucket's lifecycle rule "abort incomplete multipart uploads after N days" ([OFFSITE.md](OFFSITE.md#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader (`BACKUPGRAM_MODE=s3-sync` only) |
 | `BACKUPGRAM_MODE` | `backup` | `backup` (the backup service) or `s3-sync` (a separate uploader container) |
 
 `env.sh` and the uploader's startup check validate these and exit `1` on a bad value:
 `S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
 `FALSE`, `S3_KEEP_*` whole numbers, `S3_SYNC_TIMEOUT` a whole number of seconds
-greater than 0, `S3_ENDPOINT` must start with `http://` or `https://`, and with
-`S3_BUCKET` set both credentials must resolve to non-empty values. None of them is in
-the REST API's runtime-config whitelist, and empty `S3_KEEP_*` inherit the
-`BACKUP_KEEP_*` the container was started with, never a value changed through the
-REST API. The two
+from 1 to 999999999 (at most 9 digits), `S3_ENDPOINT` must start with `http://` or
+`https://`, and with `S3_BUCKET` set both credentials must resolve to non-empty
+values. None of them is in the REST API's runtime-config whitelist, and empty
+`S3_KEEP_*` inherit the `BACKUP_KEEP_*` the container was started with, never a value
+changed through the REST API. The two
 deployments (at the end of a backup run, or a separate uploader), the retention
 rules and the disaster-recovery steps are in [OFFSITE.md](OFFSITE.md).
 

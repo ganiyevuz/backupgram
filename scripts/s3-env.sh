@@ -60,8 +60,9 @@ if [ -n "${S3_BUCKET}" ]; then
       exit 1
     fi
   done
-  if ! [[ "${S3_SYNC_TIMEOUT}" =~ ^[0-9]*[1-9][0-9]*$ ]]; then
-    echo "❌ S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0 (got '${S3_SYNC_TIMEOUT}')." >&2
+  # 1 to 9 digits, not all zeros: the values s3-sync accepts too.
+  if ! [[ "${S3_SYNC_TIMEOUT}" =~ ^[0-9]{1,9}$ && "${S3_SYNC_TIMEOUT}" =~ [1-9] ]]; then
+    echo "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '${S3_SYNC_TIMEOUT}')." >&2
     exit 1
   fi
   case "${S3_ENDPOINT}" in

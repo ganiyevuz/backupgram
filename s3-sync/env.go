@@ -3,8 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -102,14 +102,18 @@ func intVar(getenv func(string) string, k string, def int) (int, error) {
 	return n, nil
 }
 
+// secondsPattern is the form of a time limit in seconds: 1 to 9 ASCII digits (at most
+// 999999999), the same values scripts/s3-env.sh accepts.
+var secondsPattern = regexp.MustCompile(`^[0-9]{1,9}$`)
+
 func secondsVar(getenv func(string) string, k string, def int64) (time.Duration, error) {
 	v := getenv(k)
 	if v == "" {
 		return time.Duration(def) * time.Second, nil
 	}
 	n, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || n <= 0 || n > math.MaxInt64/int64(time.Second) {
-		return 0, fmt.Errorf("%s must be a whole number of seconds greater than 0 (got %q)", k, v)
+	if !secondsPattern.MatchString(v) || err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a whole number of seconds from 1 to 999999999 (got %q)", k, v)
 	}
 	return time.Duration(n) * time.Second, nil
 }

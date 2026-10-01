@@ -608,7 +608,11 @@ scenario_s3_settings_validated() {
   rm -f "${secret}"
   S3_SYNC_TIMEOUT="0" run_backup
   expect_rc 1 "a zero time limit"
-  expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0 (got '0')."
+  expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '0')."
+  # Ten digits: s3-sync would refuse it, so the shell check does too.
+  S3_SYNC_TIMEOUT="1000000000" run_backup
+  expect_rc 1 "a time limit of ten digits"
+  expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '1000000000')."
   # Off-site retention follows the container's own BACKUP_KEEP_*, never a REST API override of
   # them: with BACKUP_KEEP_DAYS=0 inherited, a 2–5-day-old dump would not even be uploaded.
   local old n

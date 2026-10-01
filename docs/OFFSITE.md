@@ -172,15 +172,15 @@ Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (
 | `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers. Empty means the container's own `BACKUP_KEEP_*` (the image defaults `7` / `4` / `6` unless you set them), as the container was started with: a `BACKUP_KEEP_*` changed through the REST API does not change them. |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only; backupgram never deletes from the bucket. |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix. |
-| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (greater than 0). A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit or by `SIGTERM` tries to abort its unfinished upload, which a stalled endpoint may not answer and a sync killed outright cannot do: set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds from 1 to 999999999. A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit or by `SIGTERM` tries to abort its unfinished upload, which a stalled endpoint may not answer and a sync killed outright cannot do: set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader. Uploader mode only. |
 | `BACKUPGRAM_MODE` | `backup` | `backup` or `s3-sync` (the uploader). |
 
 The settings are validated at startup and in each run (`❌ …` and exit `1`):
 `S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
 `FALSE`, `S3_KEEP_*` whole numbers, `S3_SYNC_TIMEOUT` a whole number of seconds
-greater than 0, `S3_ENDPOINT` must start with `http://` or `https://`,
-`BACKUPGRAM_MODE` must be `backup` or `s3-sync`, and with `S3_BUCKET` set
+from 1 to 999999999 (at most 9 digits), `S3_ENDPOINT` must start with `http://` or
+`https://`, `BACKUPGRAM_MODE` must be `backup` or `s3-sync`, and with `S3_BUCKET` set
 both credentials must resolve to non-empty values (a `_FILE` that cannot be read is an
 error too). None of these settings can be changed through the REST API.
 

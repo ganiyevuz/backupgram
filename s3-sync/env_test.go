@@ -75,11 +75,20 @@ func TestLoadEnvSyncTimeout(t *testing.T) {
 	if err != nil || e.SyncTimeout != 90*time.Second {
 		t.Errorf("S3_SYNC_TIMEOUT=90: %v, err %v", e.SyncTimeout, err)
 	}
-	for _, bad := range []string{"0", "abc", "-5", "1.5"} {
+	// The values scripts/s3-env.sh accepts: 1 to 9 digits, above 0, leading zeros allowed.
+	for v, want := range map[string]time.Duration{"0005": 5 * time.Second, "999999999": 999999999 * time.Second} {
+		m["S3_SYNC_TIMEOUT"] = v
+		e, err := LoadEnv(envOf(m))
+		if err != nil || e.SyncTimeout != want {
+			t.Errorf("S3_SYNC_TIMEOUT=%q: %v, err %v; want %v", v, e.SyncTimeout, err, want)
+		}
+	}
+	for _, bad := range []string{"0", "abc", "-5", "-1", "+5", " 5", "1.5", "1000000000"} {
 		m["S3_SYNC_TIMEOUT"] = bad
 		_, err := LoadEnv(envOf(m))
-		if err == nil || !strings.Contains(err.Error(), "S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0") {
-			t.Errorf("S3_SYNC_TIMEOUT=%q: err = %v", bad, err)
+		want := `S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got "` + bad + `")`
+		if err == nil || err.Error() != want {
+			t.Errorf("S3_SYNC_TIMEOUT=%q: err = %v, want %s", bad, err, want)
 		}
 	}
 }
