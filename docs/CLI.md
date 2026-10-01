@@ -81,10 +81,12 @@ exits `1` with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
 damaged file).` Damage is caught in encrypted dumps (gpg's integrity check) and in
 gzip SQL dumps (`.sql.gz`, gzip's checksum), encrypted or not; a damaged unencrypted
 custom-format or plain `.sql` dump shows only as `pg_restore` / `psql` errors in the
-output. A wrong key fails before anything is restored; a damaged file can fail
-part-way. Either way, a target database the restore created is dropped again,
-and an existing one gets `⚠️ '<db>' may be partially restored: drop it before
-retrying.`
+output. A restore that stops before it has read the whole stream (`pg_restore`
+refusing the archive, a lost connection) exits `1` with `❌ The restore stopped before
+it read the whole backup (see the errors above).` A wrong key fails before anything is
+restored; a damaged file can fail part-way. In each case, a target database the restore
+created is dropped again, and an existing one gets `⚠️ '<db>' may be partially
+restored: drop it before retrying.`
 
 ```sh
 # Interactive mode -- pick from a numbered list

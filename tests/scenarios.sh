@@ -957,11 +957,12 @@ SH
 
 # A download cut off mid-stream: a database this restore created is dropped again; one that
 # already existed is left alone, with a warning that it may be partially restored. A damaged
-# .sql.gz that arrives in full (or a local one) gets the same cleanup: gunzip fails.
+# .sql.gz that arrives in full (or a local one) gets the same cleanup: gunzip fails. So does
+# a restore that stops before it has read the whole backup.
 scenario_s3_restore_interrupted() {
   fresh_backup_dir
   s3_env
-  local shims file damaged
+  local shims file damaged key
   psql_su -d database -c "DROP TABLE IF EXISTS cut_probe" \
     -c "CREATE TABLE cut_probe AS SELECT g AS id, md5(g::text) AS v FROM generate_series(1, 100000) g"
   psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_cut WITH (FORCE)"
@@ -969,10 +970,14 @@ scenario_s3_restore_interrupted() {
   expect_rc 0 "an unencrypted backup with an off-site copy"
   # A shim ahead of the real s3-sync: `get` passes the object's first 8 KiB, then exits
   # SHIM_GET_RC: 1 (default) is a download cut off, 0 a damaged object that arrives in full.
+  # With SHIM_GET_JUNK set, `get` sends 1 MiB of zeros instead: more than a pipe holds.
   shims="$(mktemp -d)"
   cat > "${shims}/s3-sync" <<'SH'
 #!/bin/sh
 PATH="${PATH#"${SHIM_DIR}":}"
+if [ "$1" = "get" ] && [ -n "${SHIM_GET_JUNK}" ]; then
+  exec head -c 1048576 /dev/zero
+fi
 if [ "$1" = "get" ]; then
   s3-sync "$@" | head -c 8192
   exit "${SHIM_GET_RC:-1}"
@@ -1021,6 +1026,22 @@ SH
   expect_out "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)."
   [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "0" ] \
     || fail "the database this restore created from a damaged local file was not dropped"
+  # An unencrypted custom-format object that pg_restore refuses at once: s3-sync get dies of
+  # SIGPIPE, so the restore stopped before it read the whole backup. Not a success.
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="" S3_ALLOW_UNENCRYPTED="TRUE" run_backup
+  expect_rc 0 "an unencrypted custom-format backup with an off-site copy"
+  key="$(s3_keys | grep '\.dump$')"
+  set +e
+  RUN_OUT="$(PATH="${shims}:${PATH}" SHIM_DIR="${shims}" SHIM_GET_JUNK=1 BACKUP_ENCRYPTION_KEY="" \
+    bash "${RESTORE_SH}" --from-s3 "${key}" restored_cut < /dev/null 2>&1)"
+  RUN_RC=$?
+  set -e
+  printf '%s\n' "${RUN_OUT}" | sed 's/^/    │ /'
+  expect_rc 1 "a custom-format restore that stops at once, into a new database"
+  expect_out "❌ The restore stopped before it read the whole backup (see the errors above)."
+  expect_no_out "✅ Restore completed"
+  [ "$(psql_su -d postgres -tAc "SELECT count(*) FROM pg_database WHERE datname = 'restored_cut'")" = "0" ] \
+    || fail "the database this restore created was not dropped after the restore stopped early"
   psql_su -d database -c "DROP TABLE cut_probe"
   rm -rf "${shims}" "$(dirname "${damaged}")"
 }

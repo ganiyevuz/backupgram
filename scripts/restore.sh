@@ -232,15 +232,9 @@ fi
 CREATED_DB="FALSE"
 RESTORING="FALSE"
 
-# The backup could not be read: the wrong key, a damaged file, or (off-site) a download cut
-# off. A stream that failed part-way may have restored part of the dump: a database this run
-# created is dropped again; one that existed is left, with a warning.
-unreadable_backup() {
-  if [ -n "${S3_KEY}" ]; then
-    echo "❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object)." >&2
-  else
-    echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
-  fi
+# A restore that failed part-way may have restored part of the dump: a database this run
+# created is dropped again; one that existed is left, with a warning. Exits 1.
+abandon_restore() {
   if [ "${RESTORING}" = "TRUE" ]; then
     if [ "${IS_CLUSTER}" = "TRUE" ]; then
       echo "⚠️ The cluster may be partially restored: check its databases before retrying." >&2
@@ -255,6 +249,17 @@ unreadable_backup() {
     fi
   fi
   exit 1
+}
+
+# The backup could not be read: the wrong key, a damaged file, or (off-site) a download cut
+# off.
+unreadable_backup() {
+  if [ -n "${S3_KEY}" ]; then
+    echo "❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object)." >&2
+  else
+    echo "❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file)." >&2
+  fi
+  abandon_restore
 }
 
 # Step 1: GPG-encrypted backups are decrypted with a passphrase file, never a
@@ -304,24 +309,32 @@ backup_stream() {
 }
 # After a failed `backup_stream | … | <restore>` pipeline, called as
 #   stream_failure "$?" "${PIPESTATUS[@]}"
-# (both expanded in the same command, before either is reset). The stages before the
-# restore read the backup: the stream itself when it decrypts or downloads, and gunzip.
-# One of them failing means the backup could not be read: exit 1 with a clear message.
-# That catches a damaged encrypted dump (gpg's integrity check) and a damaged .sql.gz
-# (gzip's checksum); a damaged unencrypted custom-format or plain .sql dump shows only
-# as pg_restore / psql errors. A reading stage killed by SIGPIPE (141) only saw the
-# restore stop first, so the restore's own status decides. Any other failure is returned
-# for the caller to treat as fatal or as a warning.
+# (both expanded in the same command, before either is reset). Every stage before the
+# restore reads the backup: the stream (cat, gpg or s3-sync get) and gunzip.
+# - One of them failing means the backup could not be read: exit 1 with a clear message.
+#   That catches a damaged encrypted dump (gpg's integrity check) and a damaged .sql.gz
+#   (gzip's checksum); a damaged unencrypted custom-format or plain .sql dump shows only
+#   as pg_restore / psql errors.
+# - Else, one killed by SIGPIPE (141) means the restore stopped before it read the whole
+#   backup: exit 1 too, with the same cleanup. gpg ignores SIGPIPE and exits 2 instead, so
+#   an encrypted stream whose restore stopped first reads as "Could not read the backup".
+# - Else the restore's own failure is returned, for the caller to treat as fatal or as a
+#   warning.
 stream_failure() {
-  local rc="$1" stage=0
+  local rc="$1" stopped="FALSE"
   shift
   while [ "$#" -gt 1 ]; do
-    if [ "$1" -ne 0 ] && [ "$1" -ne 141 ] && { [ "${stage}" -gt 0 ] || [ "${STREAM_DECRYPT}" = "TRUE" ]; }; then
+    if [ "$1" -eq 141 ]; then
+      stopped="TRUE"
+    elif [ "$1" -ne 0 ]; then
       unreadable_backup
     fi
-    stage=$((stage + 1))
     shift
   done
+  if [ "${stopped}" = "TRUE" ]; then
+    echo "❌ The restore stopped before it read the whole backup (see the errors above)." >&2
+    abandon_restore
+  fi
   return "${rc}"
 }
 # Without .gpg, the name tells the format.

@@ -42,10 +42,15 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   through the decryption pipe), and only then renamed into place. Leftover `.part`
   files are removed by the next run.
 - `restore` exits 1 with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
-  damaged file).` when an encrypted dump cannot be decrypted. When the stream fails
-  part-way, a target database the restore created is dropped again, and an existing
-  one gets `⚠️ '<db>' may be partially restored: drop it before retrying.` The target
-  name derived from the file name also strips a trailing `.dump`.
+  damaged file).` when the backup cannot be read: an encrypted dump that does not
+  decrypt, or a damaged `.sql.gz`, encrypted or not (gzip's checksum). A streamed
+  restore that stops before it has read the whole backup (`pg_restore` refusing the
+  archive, a lost connection) exits 1 with `❌ The restore stopped before it read the
+  whole backup (see the errors above).` instead of reporting success. In each case a
+  target database the restore created is dropped again, and an existing one gets
+  `⚠️ '<db>' may be partially restored: drop it before retrying.` A damaged unencrypted
+  custom-format or plain `.sql` dump still shows only as `pg_restore` / `psql` errors.
+  The target name derived from the file name also strips a trailing `.dump`.
 - `BACKUP_LATEST_TYPE=hardlink` pointed the `-latest` link at a path relative to the
   working directory.
 - Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer

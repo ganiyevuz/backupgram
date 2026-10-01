@@ -264,9 +264,12 @@ pipe must succeed for the dump to be accepted.
 | cluster | `pg_dumpall \| gzip` (`POSTGRES_CLUSTER=TRUE`) | `gunzip -c >/dev/null` | `psql -d postgres` |
 | GPG (`.gpg`) | wraps any of the above except directory | through the decryption pipe | streamed into the restore; a tar-archived directory decrypts to a temp file |
 
-Directory-format dumps are never encrypted. A wrong key or a damaged encrypted
-file makes `restore` exit `1` with
-`❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file).`
+Directory-format dumps are never encrypted. A wrong key, a damaged encrypted file or
+a damaged `.sql.gz` (encrypted or not) makes `restore` exit `1` with
+`❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a damaged file).`; a
+streamed restore that stops before it has read the whole backup exits `1` with
+`❌ The restore stopped before it read the whole backup (see the errors above).` Both
+drop a target database the restore created.
 
 ---
 
