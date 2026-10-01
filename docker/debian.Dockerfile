@@ -98,6 +98,7 @@ ENV POSTGRES_DB="" \
     S3_KEEP_MONTHS="" \
     S3_PRUNE="TRUE" \
     S3_ALLOW_UNENCRYPTED="FALSE" \
+    S3_SYNC_TIMEOUT="3600" \
     S3_SCHEDULE="*/15 * * * *" \
     SCHEDULE="@daily" \
     VALIDATE_ON_START="TRUE" \

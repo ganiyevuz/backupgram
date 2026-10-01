@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func envOf(m map[string]string) func(string) string {
@@ -23,6 +24,9 @@ func TestLoadEnvDefaults(t *testing.T) {
 	}
 	if e.Retention != (Retention{Days: 7, Weeks: 4, Months: 6}) {
 		t.Errorf("retention = %+v", e.Retention)
+	}
+	if e.SyncTimeout != time.Hour {
+		t.Errorf("sync timeout = %v, want 1h", e.SyncTimeout)
 	}
 	if e.Location() != "s3://b" {
 		t.Errorf("location = %q", e.Location())
@@ -61,5 +65,21 @@ func TestLoadEnvValues(t *testing.T) {
 	}
 	if !e.PathStyle || e.Prune || e.Retention.Days != 14 || e.Location() != "s3://b/platform-test" {
 		t.Errorf("env = %+v location %q", e, e.Location())
+	}
+}
+
+func TestLoadEnvSyncTimeout(t *testing.T) {
+	m := baseEnv()
+	m["S3_SYNC_TIMEOUT"] = "90"
+	e, err := LoadEnv(envOf(m))
+	if err != nil || e.SyncTimeout != 90*time.Second {
+		t.Errorf("S3_SYNC_TIMEOUT=90: %v, err %v", e.SyncTimeout, err)
+	}
+	for _, bad := range []string{"0", "abc", "-5", "1.5"} {
+		m["S3_SYNC_TIMEOUT"] = bad
+		_, err := LoadEnv(envOf(m))
+		if err == nil || !strings.Contains(err.Error(), "S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0") {
+			t.Errorf("S3_SYNC_TIMEOUT=%q: err = %v", bad, err)
+		}
 	}
 }

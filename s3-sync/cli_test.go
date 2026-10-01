@@ -67,6 +67,39 @@ func TestRunSyncCommand(t *testing.T) {
 	}
 }
 
+// A stalled endpoint must not hold the backup's lock: the sync stops at S3_SYNC_TIMEOUT and
+// reads as failed.
+func TestRunSyncStopsAtTheTimeLimit(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
+	status := filepath.Join(t.TempDir(), "status")
+	st := newFake()
+	st.listHook = func(ctx context.Context, _ int) error { // a server that never answers
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	env := baseEnv()
+	env["S3_SYNC_TIMEOUT"] = "1"
+	start := time.Now()
+	code, _, errOut := runWith(t, st, env, "sync", "--dir", dir, "--status", status)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("the sync took %v with S3_SYNC_TIMEOUT=1", elapsed)
+	}
+	if code != 1 {
+		t.Errorf("a sync stopped by the time limit: exit %d, want 1", code)
+	}
+	if !strings.Contains(errOut, "⚠️ off-site: the sync stopped after 1s (S3_SYNC_TIMEOUT). It will be retried on the next run.") {
+		t.Errorf("stderr = %s", errOut)
+	}
+	raw, err := os.ReadFile(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(raw), "result failed ") {
+		t.Errorf("status after a stopped sync = %q", raw)
+	}
+}
+
 func TestRunListGetLatest(t *testing.T) {
 	st := newFake()
 	st.objects["p/db/db-20261123-040000.dump.gpg"] = []byte("newest")

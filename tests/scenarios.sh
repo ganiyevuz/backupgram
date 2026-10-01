@@ -596,6 +596,9 @@ scenario_s3_settings_validated() {
   expect_rc 0 "the _FILE secret wins over the plain variable"
   expect_out "☁️ database: uploaded"
   rm -f "${secret}"
+  S3_SYNC_TIMEOUT="0" run_backup
+  expect_rc 1 "a zero time limit"
+  expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0 (got '0')."
 }
 
 scenario_s3_uploader_mode() {

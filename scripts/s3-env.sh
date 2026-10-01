@@ -44,6 +44,7 @@ if [ -n "${S3_BUCKET}" ]; then
   export S3_KEEP_DAYS="${S3_KEEP_DAYS:-${BACKUP_KEEP_DAYS:-7}}"
   export S3_KEEP_WEEKS="${S3_KEEP_WEEKS:-${BACKUP_KEEP_WEEKS:-4}}"
   export S3_KEEP_MONTHS="${S3_KEEP_MONTHS:-${BACKUP_KEEP_MONTHS:-6}}"
+  export S3_SYNC_TIMEOUT="${S3_SYNC_TIMEOUT:-3600}"
   for _s3_bool in S3_FORCE_PATH_STYLE S3_PRUNE S3_ALLOW_UNENCRYPTED; do
     case "${!_s3_bool}" in
       TRUE | FALSE) ;;
@@ -59,6 +60,10 @@ if [ -n "${S3_BUCKET}" ]; then
       exit 1
     fi
   done
+  if ! [[ "${S3_SYNC_TIMEOUT}" =~ ^[0-9]*[1-9][0-9]*$ ]]; then
+    echo "❌ S3_SYNC_TIMEOUT must be a whole number of seconds greater than 0 (got '${S3_SYNC_TIMEOUT}')." >&2
+    exit 1
+  fi
   case "${S3_ENDPOINT}" in
     http://?* | https://?*) ;;
     *)

@@ -16,13 +16,22 @@ type fakeStorage struct {
 	removeErr map[string]error
 	listErr   error
 	shortStat map[string]bool // Stat reports one byte less: a truncated upload
+	// listHook runs before each List with its call number (from 1); an error fails that List.
+	listHook func(ctx context.Context, call int) error
+	lists    int
 }
 
 func newFake() *fakeStorage {
 	return &fakeStorage{objects: map[string][]byte{}, putErr: map[string]error{}, removeErr: map[string]error{}, shortStat: map[string]bool{}}
 }
 
-func (f *fakeStorage) List(_ context.Context, prefix string) ([]ObjectInfo, error) {
+func (f *fakeStorage) List(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	f.lists++
+	if f.listHook != nil {
+		if err := f.listHook(ctx, f.lists); err != nil {
+			return nil, err
+		}
+	}
 	if f.listErr != nil {
 		return nil, f.listErr
 	}

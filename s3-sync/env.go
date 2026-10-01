@@ -3,9 +3,11 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Env is the S3_* configuration. scripts/s3-env.sh resolves the *_FILE secrets and the
@@ -14,6 +16,7 @@ type Env struct {
 	Bucket, Endpoint, Region, AccessKey, SecretKey, Prefix string
 	PathStyle, Prune, AllowUnencrypted                     bool
 	Retention                                              Retention
+	SyncTimeout                                            time.Duration // the time limit of one sync
 }
 
 // LoadEnv reads and checks the S3_* variables.
@@ -60,6 +63,9 @@ func LoadEnv(getenv func(string) string) (Env, error) {
 	if e.Retention.Months, err = intVar(getenv, "S3_KEEP_MONTHS", 6); err != nil {
 		return Env{}, err
 	}
+	if e.SyncTimeout, err = secondsVar(getenv, "S3_SYNC_TIMEOUT", 3600); err != nil {
+		return Env{}, err
+	}
 	return e, nil
 }
 
@@ -94,4 +100,16 @@ func intVar(getenv func(string) string, k string, def int) (int, error) {
 		return 0, fmt.Errorf("%s must be a whole number (got %q)", k, v)
 	}
 	return n, nil
+}
+
+func secondsVar(getenv func(string) string, k string, def int64) (time.Duration, error) {
+	v := getenv(k)
+	if v == "" {
+		return time.Duration(def) * time.Second, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 || n > math.MaxInt64/int64(time.Second) {
+		return 0, fmt.Errorf("%s must be a whole number of seconds greater than 0 (got %q)", k, v)
+	}
+	return time.Duration(n) * time.Second, nil
 }

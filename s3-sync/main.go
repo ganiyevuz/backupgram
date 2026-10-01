@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"sort"
+	"syscall"
 	"time"
 )
 
@@ -20,7 +23,11 @@ const usage = `usage: s3-sync <command> [arguments]
 Settings come from the S3_* environment variables.`
 
 func main() {
-	os.Exit(run(context.Background(), os.Args[1:], os.Getenv, os.Stdout, os.Stderr, NewMinioStorage, time.Now))
+	// SIGTERM (docker stop) cancels the requests in flight; a sync then still writes its status.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Getenv, os.Stdout, os.Stderr, NewMinioStorage, time.Now)
+	stop()
+	os.Exit(code)
 }
 
 // run is main without the process. Exit codes: 0 ok, 1 failed, 2 bad usage or settings.
@@ -61,7 +68,16 @@ func cmdSync(ctx context.Context, args []string, env Env, st Storage, out, errOu
 	}
 	s := Settings{Location: env.Location(), Prefix: env.Prefix, Retention: env.Retention,
 		Prune: env.Prune, AllowUnencrypted: env.AllowUnencrypted}
+	// Only a sync has a time limit: a stalled endpoint must not hold the backup's lock (or the
+	// uploader's) forever. A restore's get may rightly take hours.
+	ctx, cancel := context.WithTimeout(ctx, env.SyncTimeout)
+	defer cancel()
 	res := RunSync(ctx, st, s, *dir, now(), out, errOut)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		fmt.Fprintf(errOut, "⚠️ off-site: the sync stopped after %ds (S3_SYNC_TIMEOUT). It will be retried on the next run.\n",
+			int64(env.SyncTimeout/time.Second))
+		res.OK = false
+	}
 	if *status != "" {
 		if err := WriteStatus(*status, res.OK, now(), res.Objects); err != nil {
 			fmt.Fprintf(errOut, "⚠️ off-site: cannot write %s (%v).\n", *status, err)
