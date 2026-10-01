@@ -32,7 +32,8 @@ The off-site copy is added on top, and only dumps leave the server:
   upload is checked: the bucket must report the local size, or the upload counts as
   failed and is retried on the next sync. A key that exists with a different size (an
   interrupted or replaced upload) is uploaded again. Each sync has a time limit
-  (`S3_SYNC_TIMEOUT`), so a stalled endpoint never holds up the backups.
+  (`S3_SYNC_TIMEOUT`), so a stalled endpoint holds up the backups (their lock) for at
+  most that long.
 - `list --s3` and `restore --from-s3` read straight from the bucket.
 
 Only an object at exactly `<S3_PREFIX>/<db>/<file>` with a stamped file name
@@ -170,7 +171,7 @@ Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (
 | `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers. Empty means the container's own `BACKUP_KEEP_*` (the image defaults `7` / `4` / `6` unless you set them), as the container was started with: a `BACKUP_KEEP_*` changed through the REST API does not change them. |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only; backupgram never deletes from the bucket. |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix. |
-| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (greater than 0). A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit or by `SIGTERM` aborts its unfinished upload; one killed outright cannot, so set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (greater than 0). A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit or by `SIGTERM` aborts its unfinished upload; one killed outright cannot, so set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). With the sync at the end of each backup run, keep it below the `SCHEDULE` interval minus the time the dumps take: a run still holding the lock at the next tick makes that tick skip (it exits `75` and dumps nothing). |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader. Uploader mode only. |
 | `BACKUPGRAM_MODE` | `backup` | `backup` or `s3-sync` (the uploader). |
 

@@ -310,8 +310,8 @@ work; `scripts/s3-env.sh` resolves and validates the `S3_*` settings and
   database settings and no key, and the backup folder can be mounted read-only.
 
 Each sync stops at `S3_SYNC_TIMEOUT` (an hour by default; `SIGTERM` stops it too) and
-then counts as failed, so a stalled endpoint never holds the backup's lock or the
-uploader's.
+then counts as failed, so a stalled endpoint holds the backup's lock, or the
+uploader's, for at most `S3_SYNC_TIMEOUT`.
 
 ```mermaid
 flowchart TD
