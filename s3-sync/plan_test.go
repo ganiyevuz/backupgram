@@ -65,9 +65,25 @@ func TestPlanPrune(t *testing.T) {
 }
 
 func TestStampedObjects(t *testing.T) {
-	list := []ObjectInfo{{Key: "p/db/db-20261001-040000.dump.gpg", Size: 3}, {Key: "p/readme.txt", Size: 1}}
-	got := stampedObjects(list)
+	// With prefix "p", only objects at p/<db>/<name> count.
+	list := []ObjectInfo{
+		{Key: "p/db/db-20261001-040000.dump.gpg", Size: 3},    // valid
+		{Key: "p/readme.txt", Size: 1},                        // not stamped
+		{Key: "p/eu/db/db-20261001-040000.dump.gpg", Size: 5}, // nested prefix, excluded
+		{Key: "p/other/db-20261001-040000.dump.gpg", Size: 7}, // mismatched db folder, excluded
+	}
+	got := stampedObjects("p", list)
 	if len(got) != 1 || got[0].DB != "db" || got[0].Size != 3 {
-		t.Errorf("stampedObjects = %+v", got)
+		t.Errorf("with prefix 'p': stampedObjects = %+v, want 1 object (db, size 3)", got)
+	}
+
+	// With empty prefix, only objects at <db>/<name> count.
+	emptyList := []ObjectInfo{
+		{Key: "db/db-20261001-040000.dump.gpg", Size: 4},  // valid
+		{Key: "x/y/db-20261001-040000.dump.gpg", Size: 6}, // nested, excluded
+	}
+	got = stampedObjects("", emptyList)
+	if len(got) != 1 || got[0].DB != "db" || got[0].Size != 4 {
+		t.Errorf("with prefix '': stampedObjects = %+v, want 1 object (db, size 4)", got)
 	}
 }

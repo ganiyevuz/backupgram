@@ -19,12 +19,15 @@ type Upload struct {
 	Key  string
 }
 
-// stampedObjects keeps the listed objects whose names are stamped dumps.
-func stampedObjects(list []ObjectInfo) []RemoteObject {
+// stampedObjects keeps the listed objects whose names are stamped dumps at the correct key path:
+// <prefix>/<db>/<name> (where name parses as stamped). Objects at wrong paths are excluded.
+func stampedObjects(prefix string, list []ObjectInfo) []RemoteObject {
 	var out []RemoteObject
 	for _, o := range list {
 		if db, stamp, ok := ParseStamped(baseName(o.Key)); ok {
-			out = append(out, RemoteObject{Key: o.Key, Size: o.Size, DB: db, Stamp: stamp})
+			if o.Key == ObjectKey(prefix, db, baseName(o.Key)) {
+				out = append(out, RemoteObject{Key: o.Key, Size: o.Size, DB: db, Stamp: stamp})
+			}
 		}
 	}
 	return out
