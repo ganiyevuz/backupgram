@@ -80,6 +80,11 @@ render_metrics() {
   prom_header backupgram_disk_available_bytes "Free space on the filesystem holding BACKUP_DIR."
   kb="$(df -Pk "${BACKUP_DIR}" 2>/dev/null | awk 'NR==2 {print $4}')"
   echo "backupgram_disk_available_bytes{${l}} $(( ${kb:-0} * 1024 ))"
+
+  # Off-site copies (lib/s3.sh), when enabled
+  if [ -n "${S3_BUCKET}" ] && declare -F render_offsite_metrics >/dev/null; then
+    render_offsite_metrics
+  fi
 }
 
 # The textfile's name: backupgram.prom, or backupgram-<project>.prom (sanitised).

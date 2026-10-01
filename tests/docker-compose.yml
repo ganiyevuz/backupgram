@@ -17,14 +17,24 @@ services:
       timeout: 5s
       retries: 30
 
+  # The S3 test server. RustFS runs as a non-root user, so /data stays the image's own volume
+  # (a tmpfs there is root-owned and kills it); `down -v` removes it. Ready on GET /health -> 200
+  # (it answers 503 for a moment first): s3_env in tests/lib.sh retries until then.
+  s3:
+    image: rustfs/rustfs:1.0.0
+    environment:
+      RUSTFS_ACCESS_KEY: testkey
+      RUSTFS_SECRET_KEY: testsecret123
+
   runner:
     build:
-      context: .
-      dockerfile: runner.Dockerfile
+      context: ..
+      dockerfile: tests/runner.Dockerfile
       args:
         PG_MAJOR: ${PG_MAJOR:-18}
     depends_on:
       db: { condition: service_healthy }
+      s3: { condition: service_started }
     working_dir: /work
     volumes:
       - ..:/work
@@ -50,3 +60,4 @@ services:
       BACKUP_MIN_DISK_SPACE: "100"
       TELEGRAM_NOTIFY_ON: "none"
       PROJECT_NAME: "CI Test"
+      TEST_S3_ENDPOINT: http://s3:9000

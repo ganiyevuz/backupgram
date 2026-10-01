@@ -19,8 +19,8 @@ services:
 
   runner:
     build:
-      context: ..
-      dockerfile: runner.Dockerfile
+      context: ../..
+      dockerfile: tests/runner.Dockerfile
     depends_on:
       db: { condition: service_healthy }
     working_dir: /work

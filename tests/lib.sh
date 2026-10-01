@@ -97,3 +97,31 @@ pharmakon_env() {
   export BACKUP_SUFFIX=".dump" BACKUP_LATEST_TYPE="none" BACKUP_LAYOUT="snapshot"
   export BACKUP_RLS_GUARD="TRUE" BACKUP_MIN_BYTES="1024" BACKUP_ENCRYPTION_KEY="pharmakon test key"
 }
+
+# The S3 test server (RustFS): the CI service on 127.0.0.1:9000, the harness's `s3` service.
+TEST_S3_ENDPOINT="${TEST_S3_ENDPOINT:-http://127.0.0.1:9000}"
+TEST_S3_ACCESS_KEY="testkey"
+TEST_S3_SECRET_KEY="testsecret123"
+
+# Exports the S3_* settings for a fresh, empty bucket on the test server (prefix "test").
+# Retries for 30 s: the server may still be starting.
+s3_env() {
+  local bucket i
+  bucket="t$(date +%s%N)"
+  for i in $(seq 1 30); do
+    if curl -sf -X PUT --aws-sigv4 "aws:amz:us-east-1:s3" \
+      --user "${TEST_S3_ACCESS_KEY}:${TEST_S3_SECRET_KEY}" "${TEST_S3_ENDPOINT}/${bucket}" >/dev/null; then
+      break
+    fi
+    [ "${i}" != "30" ] || fail "could not create bucket ${bucket} on ${TEST_S3_ENDPOINT}"
+    sleep 1
+  done
+  export S3_BUCKET="${bucket}" S3_ENDPOINT="${TEST_S3_ENDPOINT}" S3_REGION="us-east-1" \
+    S3_ACCESS_KEY_ID="${TEST_S3_ACCESS_KEY}" S3_SECRET_ACCESS_KEY="${TEST_S3_SECRET_KEY}" \
+    S3_FORCE_PATH_STYLE="TRUE" S3_PREFIX="test"
+}
+
+# The bucket's keys, one per line, sorted (empty when there are none).
+s3_keys() {
+  s3-sync ls | cut -f1 | sort
+}

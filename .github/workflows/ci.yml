@@ -127,6 +127,14 @@ jobs:
             | sudo tar -xz -C /usr/local/bin --strip-components=1 prometheus-3.5.0.linux-amd64/promtool
           promtool --version
 
+      - name: Start the S3 test server (RustFS) and build s3-sync
+        run: |
+          docker run -d --name s3 -p 9000:9000 \
+            -e RUSTFS_ACCESS_KEY=testkey -e RUSTFS_SECRET_KEY=testsecret123 rustfs/rustfs:1.0.0
+          go build -C s3-sync -o /usr/local/bin/s3-sync .
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:9000/health && break; sleep 1; done
+          curl -sf -o /dev/null http://127.0.0.1:9000/health
+
       - name: "Scenario: baseline"
         run: bash tests/scenarios.sh baseline
 
@@ -198,6 +206,21 @@ jobs:
 
       - name: "Scenario: retention keeps a failing database's copies"
         run: bash tests/scenarios.sh retention_keeps_failing_database
+
+      - name: "Scenario: S3 test server"
+        run: bash tests/scenarios.sh s3_smoke
+
+      - name: "Scenario: off-site copies at the end of a backup run"
+        run: bash tests/scenarios.sh s3_inline_upload
+
+      - name: "Scenario: an off-site failure is a warning"
+        run: bash tests/scenarios.sh s3_upload_failure_is_a_warning
+
+      - name: "Scenario: unencrypted dumps stay local"
+        run: bash tests/scenarios.sh s3_refuses_unencrypted
+
+      - name: "Scenario: S3 settings validated, _FILE secrets"
+        run: bash tests/scenarios.sh s3_settings_validated
 
       - name: Test pg_dump backup
         run: |

@@ -256,3 +256,7 @@ if [ ! -d "${BACKUP_DIR}" ] || [ ! -w "${BACKUP_DIR}" ] || [ ! -x "${BACKUP_DIR}
   echo "❌ BACKUP_DIR points to a file or folder with insufficient permissions."
   exit 1
 fi
+
+# Off-site copies (S3): resolve and validate the S3_* settings.
+# shellcheck source=scripts/s3-env.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/s3-env.sh"

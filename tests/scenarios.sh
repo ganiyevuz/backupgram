@@ -515,6 +515,89 @@ scenario_error_hook_not_fired_on_success() {
   rm -rf "${hooks}" "${record}"
 }
 
+# The S3 test server answers and starts every scenario with an empty bucket.
+scenario_s3_smoke() {
+  s3_env
+  [ -z "$(s3_keys)" ] || fail "a fresh bucket is not empty"
+}
+
+scenario_s3_inline_upload() {
+  fresh_backup_dir
+  s3_env
+  local dir keys
+  dir="$(mktemp -d)"
+  export POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" METRICS_TEXTFILE_DIR="${dir}"
+  run_backup
+  expect_rc 0 "a backup with off-site copies"
+  expect_out "☁️ database: uploaded test/database/database-"
+  keys="$(s3_keys)"
+  [[ "${keys}" =~ ^test/database/database-[0-9]{8}-[0-9]{6}\.dump\.gpg$ ]] || fail "bucket keys: ${keys}"
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 1' "${dir}/backupgram-CI_Test.prom" || fail "offsite success metric"
+  grep -qE '^backupgram_offsite_last_timestamp_seconds\{project="CI Test",database="database"\} [0-9]+$' \
+    "${dir}/backupgram-CI_Test.prom" || fail "offsite timestamp metric"
+  promtool check metrics < "${dir}/backupgram-CI_Test.prom" || fail "promtool rejects the metrics"
+  sleep 1
+  run_backup
+  expect_rc 0 "a second run"
+  expect_out "1 uploaded, 1 already there, 0 failed"
+  # Every dump failing does not stop the sync of what is already there.
+  sleep 1
+  POSTGRES_DB="no_such_db" run_backup
+  expect_rc 1 "every dump failed"
+  expect_out "0 uploaded, 2 already there, 0 failed"
+  rm -rf "${dir}"
+}
+
+scenario_s3_upload_failure_is_a_warning() {
+  fresh_backup_dir
+  s3_env
+  local dir
+  dir="$(mktemp -d)"
+  export POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" METRICS_TEXTFILE_DIR="${dir}"
+  S3_SECRET_ACCESS_KEY="wrong-secret" run_backup
+  expect_rc 0 "an off-site failure never fails the backup"
+  expect_out "It will be retried on the next run."
+  only_file "${BACKUP_DIR}/last" 'database-[0-9]*.dump.gpg' >/dev/null
+  grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/backupgram-CI_Test.prom" \
+    || fail "offsite_sync_success must be 0"
+  S3_ENDPOINT="http://127.0.0.1:1" run_backup
+  expect_rc 0 "an unreachable endpoint never fails the backup"
+  rm -rf "${dir}"
+}
+
+scenario_s3_refuses_unencrypted() {
+  fresh_backup_dir
+  s3_env
+  export POSTGRES_EXTRA_OPTS="-Z1"
+  run_backup
+  expect_rc 0 "an unencrypted backup"
+  expect_out "not encrypted; not uploaded (S3_ALLOW_UNENCRYPTED=FALSE)."
+  [ -z "$(s3_keys)" ] || fail "an unencrypted dump was uploaded"
+  sleep 1
+  S3_ALLOW_UNENCRYPTED="TRUE" run_backup
+  expect_rc 0 "unencrypted uploads allowed"
+  [ "$(s3_keys | wc -l | tr -d ' ')" = "2" ] || fail "with S3_ALLOW_UNENCRYPTED=TRUE both dumps go up: $(s3_keys)"
+}
+
+scenario_s3_settings_validated() {
+  fresh_backup_dir
+  s3_env
+  S3_PRUNE="maybe" run_backup
+  expect_rc 1 "a bad S3 setting"
+  expect_out "S3_PRUNE must be TRUE or FALSE"
+  S3_SECRET_ACCESS_KEY="" run_backup
+  expect_rc 1 "missing credentials"
+  expect_out "S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY"
+  local secret
+  secret="$(mktemp)"
+  printf '%s' "${TEST_S3_SECRET_KEY}" > "${secret}"
+  POSTGRES_EXTRA_OPTS="-Fc" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" \
+    S3_SECRET_ACCESS_KEY="wrong" S3_SECRET_ACCESS_KEY_FILE="${secret}" run_backup
+  expect_rc 0 "the _FILE secret wins over the plain variable"
+  expect_out "☁️ database: uploaded"
+  rm -f "${secret}"
+}
+
 main() {
   local names=("$@") name
   if [ "${#names[@]}" -eq 0 ] || [ "${names[0]}" = "all" ]; then

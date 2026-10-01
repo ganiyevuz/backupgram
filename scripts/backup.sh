@@ -24,6 +24,8 @@ source "${SCRIPT_DIR}/lib/discover.sh"
 source "${SCRIPT_DIR}/lib/rls_guard.sh"
 # shellcheck source=scripts/lib/metrics.sh
 source "${SCRIPT_DIR}/lib/metrics.sh"
+# shellcheck source=scripts/lib/s3.sh
+source "${SCRIPT_DIR}/lib/s3.sh"
 
 # One run at a time, across every container that shares BACKUP_DIR. A second run
 # exits 75 (EX_TEMPFAIL) before touching anything: it would otherwise delete the
@@ -354,6 +356,12 @@ if [ "${BACKUP_SUCCESS}" -gt 0 ]; then
     || echo "⚠️ Retention could not finish; see the errors above." >&2
 else
   echo "⚠️ No database was backed up this run; retention skipped." >&2
+fi
+
+# Off-site copies (S3): upload what the bucket lacks, prune it. A problem here is
+# reported (log, metrics, alert) and never changes the run's exit code.
+if s3_enabled; then
+  s3_sync || echo "⚠️ Off-site sync did not complete; the next run retries." >&2
 fi
 
 # Metrics (never fail the backup)
