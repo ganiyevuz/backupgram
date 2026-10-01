@@ -361,7 +361,10 @@ fi
 # Off-site copies (S3): upload what the bucket lacks, prune it. A problem here is
 # reported (log, metrics, alert) and never changes the run's exit code.
 if s3_enabled; then
-  s3_sync || echo "⚠️ Off-site sync did not complete; the next run retries." >&2
+  # An invalid S3 setting has said so already, and the next run skips as well.
+  if ! s3_sync && [ "${S3_SETTINGS_INVALID}" != "TRUE" ]; then
+    echo "⚠️ Off-site sync did not complete; the next run retries." >&2
+  fi
 fi
 
 # Metrics (never fail the backup)

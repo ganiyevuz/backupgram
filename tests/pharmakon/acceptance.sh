@@ -186,12 +186,16 @@ ok "off-site: every database's newest dump is in the bucket; the uploader has no
 # The uploader runs go-cron under tini, which passes docker stop's TERM to a running sync;
 # the stop ends cleanly (exit 0), well inside Docker's 10 s timeout, not by SIGKILL.
 [ "$("${COMPOSE[@]}" exec -T uploader cat /proc/1/comm)" = "tini" ] || fail "off-site: the uploader's PID 1 is not tini"
+# -g is what passes the TERM to a running sync; an idle uploader would stop cleanly without it.
+cmdline="$("${COMPOSE[@]}" exec -T uploader sh -c 'tr "\0" " " < /proc/1/cmdline')"
+[[ "${cmdline}" == "tini -s -g -- /usr/local/bin/go-cron "* ]] \
+  || fail "off-site: the uploader's PID 1 is not tini -s -g -- go-cron: ${cmdline}"
 started=$(date +%s)
 "${COMPOSE[@]}" stop uploader
 elapsed=$(( $(date +%s) - started ))
 [ "${elapsed}" -lt 10 ] || fail "off-site: stopping the uploader took ${elapsed}s (killed at the timeout?)"
 code="$(docker inspect -f '{{.State.ExitCode}}' "$("${COMPOSE[@]}" ps -aq uploader)")"
 [ "${code}" = "0" ] || fail "off-site: the stopped uploader exited ${code}"
-ok "off-site: the uploader's PID 1 is tini; docker compose stop ended it cleanly in ${elapsed}s"
+ok "off-site: the uploader's PID 1 is tini -s -g; docker compose stop ended it cleanly in ${elapsed}s"
 
 echo "════ Pharmakon acceptance: all checks passed"

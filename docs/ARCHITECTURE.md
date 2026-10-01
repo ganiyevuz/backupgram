@@ -106,7 +106,9 @@ nothing else (see [Off-site copies](#off-site-copies)). go-cron runs under
 `tini -s -g`: on `docker stop` go-cron only waits for its job, so tini sends the
 `SIGTERM` to the whole process group and the running sync stops cleanly (`-s` makes
 tini a subreaper when it is not PID 1, e.g. under compose `init: true`). In backup
-mode `docker stop` still waits for a running backup up to the stop timeout.
+mode `docker stop` still waits for a running backup up to the stop timeout when go-cron
+is PID 1; with `backupgram-api` as PID 1 the backup ends after about 5 s, when the
+supervisor kills go-cron and exits.
 
 `backup.sh` sources its helpers from `scripts/lib/`: `layout.sh` (folders, links,
 retention), `dump.sh` (format detection, streaming dump, verification),

@@ -674,6 +674,7 @@ scenario_s3_setting_breaks_at_runtime() {
   file="$(only_file "${BACKUP_DIR}/last" 'database-[0-9]*.sql.gz')"
   expect_out "⚠️ S3_ACCESS_KEY_ID_FILE points to a missing or unreadable file. Off-site copies are off until it is fixed."
   expect_out "⚠️ off-site: skipped, an S3 setting is invalid (see above). The local backup is not affected."
+  expect_no_out "⚠️ Off-site sync did not complete; the next run retries."
   grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/backupgram-CI_Test.prom" \
     || fail "a run with a broken S3 setting must report offsite_sync_success 0:\n$(cat "${dir}/backupgram-CI_Test.prom")"
   set +e
