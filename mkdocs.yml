@@ -55,6 +55,7 @@ nav:
   - REST API: REST_API.md
   - Large Files: LARGE_FILES.md
   - Monitoring: MONITORING.md
+  - Off-site copies: OFFSITE.md
   - Architecture: ARCHITECTURE.md
   - Build: BUILD.md
 

@@ -12,6 +12,7 @@ docker exec -it <container> <command>
 - [`list`](#list--list-all-backups)
 - [`status`](#status--system-status-overview)
 - [`help`](#help--show-available-commands)
+- [The off-site uploader](#the-off-site-uploader)
 
 ---
 
@@ -58,12 +59,16 @@ including `Backup completed in …`, goes to stdout.
 The `error` hook does not run for a failed database, so alert on the exit code or
 on the [metrics](MONITORING.md).
 
+With `S3_BUCKET` set, the run ends with an [off-site sync](OFFSITE.md). A problem there
+(`⚠️ …` lines, `backupgram_offsite_sync_success 0`) never changes the exit code.
+
 ---
 
 ## `restore` — Restore from a backup
 
 Without arguments, shows an interactive picker. With a file path, restores
-directly. Auto-detects format (`.sql.gz`, `.sql.gz.gpg`, directory, tar.gz) and
+directly; `--from-telegram` and `--from-s3` fetch the backup from Telegram or the
+off-site bucket. Auto-detects format (`.sql.gz`, `.sql.gz.gpg`, directory, tar.gz) and
 handles GPG decryption automatically. The target database name is taken from the
 file name (trailing `.gpg`, `.gz`, `.tar`, `.sql`, `.dump` and the date or
 `-latest` are stripped) unless you pass it.
@@ -100,6 +105,28 @@ docker exec -it my-backup restore --from-telegram 4521 --chat -1001234567890 myd
 Requires `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` / `TELEGRAM_BOT_TOKEN`. The
 backup is downloaded over MTProto (up to 2 GB), then restored through the normal
 decrypt / auto-detect pipeline.
+
+### Restore from the off-site bucket
+
+Disaster recovery from an [S3 bucket](OFFSITE.md) (needs `S3_BUCKET` and its
+credentials, and `BACKUP_ENCRYPTION_KEY` for `.gpg` dumps):
+
+```sh
+# The newest off-site dump of a database
+docker exec -it my-backup restore --from-s3 mydb
+
+# ... into a different database
+docker exec -it my-backup restore --from-s3 mydb mydb_restored
+
+# One object, by its key (an argument with a / is a key)
+docker exec -it my-backup restore --from-s3 shop-prod/mydb/mydb-20260416-020000.sql.gz.gpg
+```
+
+The object streams from the bucket through `gpg` into the restore: nothing in clear
+text is written to disk. Exit `1` when the database or key is not found in the bucket
+(`❌ <name>: not found in s3://<bucket>/<prefix>.`) or when the dump cannot be read
+(`❌ Could not read the backup …`, a wrong key or a damaged object); nothing is
+restored then.
 
 ### Interactive mode output
 
@@ -154,6 +181,10 @@ docker exec -it my-backup list mydb
 
 # Preview what the retention policy would delete (dry run)
 docker exec -it my-backup list --cleanup-preview
+
+# What the off-site bucket holds (every database, or one)
+docker exec -it my-backup list --s3
+docker exec -it my-backup list --s3 mydb
 ```
 
 ### List output
@@ -176,6 +207,26 @@ docker exec -it my-backup list --cleanup-preview
 
 Disk usage: 168M total
 Available:  45G
+```
+
+### Off-site list output
+
+`list --s3` prints one box per database with each object's size, dump time, the
+retention tier that keeps it (`daily`, `weekly`, `monthly`, or `expires` when only the
+newest-copy rule keeps it) and its key. An object that is not a stamped dump at
+`<S3_PREFIX>/<db>/<file>` shows `-` for the dump time and the tier. It needs
+`S3_BUCKET` and its credentials, and no database access, so it also runs in the
+uploader. Exit `1` when the bucket cannot be listed.
+
+```
+╔══════════════════════════════════════╗
+║  OFF-SITE mydb
+╠══════════════════════════════════════╣
+║  42.0M   2026-04-16 02:00:00  daily    shop-prod/mydb/mydb-20260416-020000.sql.gz.gpg
+║  41.0M   2026-04-12 02:00:00  weekly   shop-prod/mydb/mydb-20260412-020000.sql.gz.gpg
+╚══════════════════════════════════════╝
+
+2 off-site dump(s) in s3://my-backups/shop-prod
 ```
 
 ### Cleanup preview output
@@ -261,3 +312,18 @@ variables.
 ```sh
 docker exec -it my-backup help
 ```
+
+---
+
+## The off-site uploader
+
+With `BACKUPGRAM_MODE=s3-sync` the container is a separate [off-site
+uploader](OFFSITE.md#b-a-separate-uploader-container): go-cron runs
+`/scripts/s3-sync.sh` on `S3_SCHEDULE`, and `list --s3` works in it. `backup` and
+`restore` need database access, which the uploader does not have. Each run is one sync:
+
+- `0` — the sync finished without a failed upload, or another sync was still running
+  (`⏳ Another off-site sync is running. Not started.`; nothing was started).
+- `1` — a sync failed (an upload, the listing, or the bucket was unreachable), or an
+  S3 setting is missing or bad. go-cron then answers `503`, so the container shows
+  unhealthy until the next good sync.

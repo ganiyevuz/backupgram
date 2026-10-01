@@ -13,6 +13,7 @@ precedence over the plain variable.
 - [Webhooks](#webhooks)
 - [Health and Advanced](#health-and-advanced)
 - [REST API and metrics](#rest-api-and-metrics)
+- [Off-site copies (S3)](#off-site-copies-s3)
 - [Docker Secrets](#docker-secrets)
 - [Retention Math](#retention-math)
 
@@ -279,6 +280,33 @@ for endpoints, the runtime-config whitelist, and the security model.
 
 ---
 
+## Off-site copies (S3)
+
+| Variable | Default | Description |
+|---|---|---|
+| `S3_BUCKET` | `""` | Enables off-site copies: every backup run ends with a sync of the bucket. Required when `BACKUPGRAM_MODE=s3-sync`. |
+| `S3_ENDPOINT` | `https://s3.amazonaws.com` | Scheme, host and optional port of any S3-compatible endpoint (`https://host:port`), no path. `http://` is allowed, for a private network. |
+| `S3_REGION` | `us-east-1` | Region of the bucket |
+| `S3_ACCESS_KEY_ID` / `S3_ACCESS_KEY_ID_FILE` | `""` | Required when `S3_BUCKET` is set; the `_FILE` variant wins |
+| `S3_SECRET_ACCESS_KEY` / `S3_SECRET_ACCESS_KEY_FILE` | `""` | Required when `S3_BUCKET` is set; the `_FILE` variant wins; never logged |
+| `S3_PREFIX` | `""` | Key prefix: dumps go to `<S3_PREFIX>/<db>/<file>`. Use one per server. |
+| `S3_FORCE_PATH_STYLE` | `FALSE` | `TRUE` for path-style addressing (most self-hosted S3 servers) |
+| `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers; empty inherits the container's `BACKUP_KEEP_*` |
+| `S3_PRUNE` | `TRUE` | `FALSE` = upload only, never delete from the bucket |
+| `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix |
+| `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader (`BACKUPGRAM_MODE=s3-sync` only) |
+| `BACKUPGRAM_MODE` | `backup` | `backup` (the backup service) or `s3-sync` (a separate uploader container) |
+
+`env.sh` and the uploader's startup check validate these and exit `1` on a bad value:
+`S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
+`FALSE`, `S3_KEEP_*` whole numbers, `S3_ENDPOINT` must start with `http://` or
+`https://`, and with `S3_BUCKET` set both credentials must resolve to non-empty
+values. None of them is in the REST API's runtime-config whitelist. The two
+deployments (at the end of a backup run, or a separate uploader), the retention
+rules and the disaster-recovery steps are in [OFFSITE.md](OFFSITE.md).
+
+---
+
 ## Docker Secrets
 
 For any credential, a `*_FILE` variant pointing at a file (typically a mounted
@@ -286,6 +314,7 @@ Docker secret) takes precedence over the plain variable:
 
 - `POSTGRES_USER_FILE`, `POSTGRES_PASSWORD_FILE`, `POSTGRES_DB_FILE`, `POSTGRES_PASSFILE_STORE`
 - `TELEGRAM_BOT_TOKEN_FILE`, `TELEGRAM_CHAT_ID_FILE`, `TELEGRAM_API_ID_FILE`, `TELEGRAM_API_HASH_FILE`
+- `S3_ACCESS_KEY_ID_FILE`, `S3_SECRET_ACCESS_KEY_FILE`
 
 ---
 

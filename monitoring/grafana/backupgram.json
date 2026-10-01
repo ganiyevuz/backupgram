@@ -127,6 +127,34 @@
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "targets": [{ "refId": "A", "expr": "backupgram_backup_duration_seconds{project=~\"$project\"}", "legendFormat": "{{project}} {{database}}" }],
       "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Age of the newest off-site dump",
+      "gridPos": { "x": 0, "y": 22, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "refId": "A", "expr": "time() - backupgram_offsite_last_timestamp_seconds{project=~\"$project\"}", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true },
+          "renameByName": { "Value": "Off-site age" } } }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Off-site age" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null }, { "color": "orange", "value": 93600 }, { "color": "red", "value": 180000 } ] } }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

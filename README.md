@@ -117,7 +117,8 @@ Full details and the self-hosted Bot API server route: **[docs/LARGE_FILES.md](d
 - **Snapshot layout** — `BACKUP_LAYOUT=snapshot` keeps timestamped names in every folder (weekly on Sundays, monthly on the 1st) and `last/` holds exactly the newest dump of each existing database.
 - **Prometheus metrics + Grafana dashboard** — per-database backup age, size and result, written for node-exporter's textfile collector or served at `GET /metrics`, with a dashboard and alert rules in [`monitoring/`](monitoring/). See [docs/MONITORING.md](docs/MONITORING.md).
 - **Telegram delivery** — Bot API for small files, **zero-setup MTProto upload up to 2 GB** (a shared app ships in the image), multi-chat fan-out.
-- **Restore tooling** — interactive, by-file, cross-database, or **`--from-telegram`** disaster recovery.
+- **Off-site copies (S3)** — keep a copy of every dump in any S3-compatible storage (AWS S3, Hetzner, Backblaze B2, Wasabi, Cloudflare R2, or RustFS/Garage/SeaweedFS on another machine): at the end of each backup run or from a separate uploader container (`BACKUPGRAM_MODE=s3-sync`), with remote retention tiers, `list --s3`, `restore --from-s3`, metrics and alerts. See [docs/OFFSITE.md](docs/OFFSITE.md).
+- **Restore tooling** — interactive, by-file, cross-database, or **`--from-telegram`** / **`--from-s3`** disaster recovery.
 - **Safety** — full backup verification, `pg_isready` and disk-space checks, a lock in `BACKUP_DIR` against overlapping runs.
 - **Integrations** — webhooks (pre/post/error), custom `run-parts` hooks, Docker secrets (`*_FILE`).
 - **REST API (opt-in)** — trigger/observe/restore/download/delete backups and change runtime settings over HTTP, behind a bearer token. See [docs/REST_API.md](docs/REST_API.md).
@@ -134,6 +135,7 @@ Full details and the self-hosted Bot API server route: **[docs/LARGE_FILES.md](d
 | [Architecture](docs/ARCHITECTURE.md) | Runtime chain, backup cycle, rotation model, format branches (C4 + mermaid) |
 | [Large Files](docs/LARGE_FILES.md) | MTProto upload for backups over 50 MB |
 | [Monitoring](docs/MONITORING.md) | Prometheus metrics, Grafana dashboard, alert rules |
+| [Off-site copies](docs/OFFSITE.md) | S3-compatible off-site copies: both deployments, retention, providers, disaster recovery |
 | [REST API](docs/REST_API.md) | Optional HTTP control surface: endpoints, auth, runtime config |
 | [Build](docs/BUILD.md) | Multi-arch image builds |
 | [Changelog](CHANGELOG.md) | Notable changes |
@@ -158,6 +160,7 @@ secrets) variants that take precedence over the plain value. The most common:
 | `BACKUP_ENCRYPTION_KEY` | `""` | GPG passphrase (enables AES-256 encryption) |
 | `METRICS_TEXTFILE_DIR` / `METRICS_ENABLE` | `""` / `FALSE` | Prometheus metrics: a textfile for node-exporter, and/or `GET /metrics` on `REST_API_PORT` |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | `""` | Telegram delivery (chat id list = fan-out) |
+| `S3_BUCKET` / `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | `""` / AWS / `""` / `""` | Off-site copies to S3-compatible storage (credentials also as `*_FILE`); `BACKUPGRAM_MODE=s3-sync` runs a separate uploader |
 | `TELEGRAM_USE_DEFAULT_API` | `TRUE` | Use the image's built-in shared app for large-file (2 GB) upload; set `FALSE` to require your own `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` |
 
 See the **[Configuration Reference](docs/CONFIGURATION.md)** for the complete list.
@@ -171,8 +174,8 @@ Available inside the container via `docker exec -it <container> <command>`:
 | Command | Purpose |
 |---|---|
 | `backup` | Trigger a full backup cycle immediately |
-| `restore` | Restore from a backup (interactive, by file, cross-db, or `--from-telegram`) |
-| `list` | List backups by rotation slot (`--cleanup-preview` for a retention dry run) |
+| `restore` | Restore from a backup (interactive, by file, cross-db, `--from-telegram`, or `--from-s3`) |
+| `list` | List backups by rotation slot (`--cleanup-preview` for a retention dry run, `--s3` for the off-site bucket) |
 | `status` | Config, last result, inventory, disk usage, lock status |
 | `help` | Quick command reference |
 

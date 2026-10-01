@@ -59,3 +59,19 @@ groups:
         labels: { severity: warning }
         annotations:
           summary: "Less than 1 GiB free for {{ $labels.project }}'s backups"
+
+      - alert: BackupgramOffsiteTooOld
+        # 26 h: one missed nightly copy plus slack. Adjust to your schedule.
+        expr: time() - backupgram_offsite_last_timestamp_seconds > 26 * 3600
+        labels: { severity: warning }
+        annotations:
+          summary: "The newest off-site {{ $labels.project }} {{ $labels.database }} dump is {{ $value | humanizeDuration }} old"
+          description: "The local backup may be fine; the copy to the bucket is not keeping up. Check the sync's log."
+
+      - alert: BackupgramOffsiteSyncFailed
+        expr: backupgram_offsite_sync_success == 0
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "The last off-site sync for {{ $labels.project }} failed"
+          description: "The next sync retries what is missing. Check the credentials, the endpoint and the bucket."

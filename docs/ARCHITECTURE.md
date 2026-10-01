@@ -4,7 +4,8 @@ This image is a pure-Bash backup runner baked into a PostgreSQL base image —
 there is no application runtime. A cron scheduler (`go-cron`) invokes
 `backup.sh` on a schedule; the script dumps each database (encrypting as it
 streams), verifies the result, rotates it, delivers it to Telegram, prunes old
-files, and writes Prometheus metrics.
+files, optionally copies the dumps to S3-compatible storage, and writes Prometheus
+metrics.
 
 - [System context (C4 L1)](#system-context-c4-l1)
 - [Containers & processes (C4 L2)](#containers--processes-c4-l2)
@@ -13,6 +14,7 @@ files, and writes Prometheus metrics.
 - [Rotation model](#rotation-model)
 - [Format branches](#format-branches)
 - [Telegram delivery](#telegram-delivery)
+- [Off-site copies](#off-site-copies)
 
 ---
 
@@ -28,12 +30,14 @@ flowchart TB
     tg["Telegram<br/><i>Bot API + MTProto</i>"]
     hook["Webhook endpoints<br/><i>monitoring / alerting</i>"]
     vol[("Backup volume<br/><i>POSIX filesystem</i>")]
+    s3[("S3-compatible storage<br/><i>off-site copies (optional)</i>")]
 
     operator -->|env vars, docker exec| runner
     runner -->|pg_dump / pg_dumpall| pg
     runner -->|upload backups + alerts| tg
     runner -->|JSON payloads| hook
     runner -->|write / rotate / prune| vol
+    runner -->|"upload / prune / restore (optional)"| s3
     runner -->|"metrics (textfile or /metrics)"| prom["Prometheus<br/><i>+ Grafana dashboard, alert rules</i>"]
 ```
 
@@ -53,19 +57,26 @@ flowchart TB
         restore["restore.sh<br/><i>restore tooling</i>"]
         hooks["hooks/ (run-parts)<br/><i>pre-backup | post-backup | error</i>"]
         tgupload["tg-upload<br/><i>Go/MTProto binary, &le;2GB</i>"]
+        s3job["s3-sync.sh<br/><i>uploader job (BACKUPGRAM_MODE=s3-sync)</i>"]
+        s3sync["s3-sync<br/><i>Go/minio-go binary:<br/>sync, ls, get, latest</i>"]
     end
 
     init -->|"VALIDATE_ON_START"| env
     init -->|"exec (default)"| cron
     init -->|"exec when REST_API_ENABLE or METRICS_ENABLE"| api
+    init -->|"exec when BACKUPGRAM_MODE=s3-sync"| cron
     api -->|supervises| cron
     cron -->|"per SCHEDULE"| backup
+    cron -->|"per S3_SCHEDULE (uploader)"| s3job
     backup -->|source| env
     backup -->|source| lib
     backup -->|run-parts| hooks
     backup -->|">50MB or method=mtproto"| tgupload
+    backup -->|"S3_BUCKET set"| s3sync
+    s3job --> s3sync
     restore -->|source| env
     restore -->|"--from-telegram"| tgupload
+    restore -->|"--from-s3"| s3sync
 ```
 
 ---
@@ -74,6 +85,7 @@ flowchart TB
 
 ```
 init.sh (ENTRYPOINT)
+  ├─ BACKUPGRAM_MODE=s3-sync:  /scripts/s3-env.sh, then exec go-cron -s "$S3_SCHEDULE" -- /scripts/s3-sync.sh
   └─ /env.sh            # standalone validation when VALIDATE_ON_START=TRUE
   ├─ REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE:  exec backupgram-api   # supervises go-cron
   └─ otherwise:                                    exec go-cron -s "$SCHEDULE" -- /backup.sh
@@ -87,10 +99,15 @@ plus `/metrics` when `METRICS_ENABLE=TRUE` and the token-protected REST routes
 when `REST_API_ENABLE=TRUE` (see [MONITORING.md](MONITORING.md) and
 [REST_API.md](REST_API.md)).
 
+With `BACKUPGRAM_MODE=s3-sync`, `init.sh` validates only the S3 settings
+(`scripts/s3-env.sh`: no `POSTGRES_*`, no key) and `exec`s go-cron with
+`scripts/s3-sync.sh` on `S3_SCHEDULE`: the container is an off-site uploader and
+nothing else (see [Off-site copies](#off-site-copies)).
+
 `backup.sh` sources its helpers from `scripts/lib/`: `layout.sh` (folders, links,
 retention), `dump.sh` (format detection, streaming dump, verification),
-`discover.sh` (database discovery), `rls_guard.sh` (row-level security checks) and
-`metrics.sh` (Prometheus output).
+`discover.sh` (database discovery), `rls_guard.sh` (row-level security checks),
+`metrics.sh` (Prometheus output) and `s3.sh` (off-site copies).
 
 **`env.sh` is dual-purpose and central:**
 
@@ -132,7 +149,8 @@ flowchart TD
     send --> dropped["dropped databases leave last/<br/>(snapshot layout)"]
     keep --> dropped
     dropped --> retention["retention<br/>(skipped if nothing was backed up)"]
-    retention --> metrics[write metrics]
+    retention --> offsite["off-site sync<br/>(S3_BUCKET; never changes the exit code)"]
+    offsite --> metrics[write metrics]
     metrics --> status["write /tmp/backup_status"]
     status --> summary[summary + Telegram message]
     summary --> post[run post-backup hook]
@@ -148,7 +166,9 @@ run ends with exit code `1`. The lock is `${BACKUP_DIR}/.lock`, so runs of the s
 configuration — the scheduled run and a manual `docker exec … backup`, or two
 containers with the same settings on one volume — run one at a time; a busy run
 prints one line and exits `75` without changing anything. Every file of a run
-carries the run's start time.
+carries the run's start time. With `S3_BUCKET` set, the off-site sync runs after
+retention (even when every dump failed) and its result goes into the metrics; a
+problem there is a warning and never changes the exit code.
 
 > **One `BACKUP_DIR` per server/configuration.** Retention prunes every backup file
 > in each folder and, in `snapshot` layout, `last/` drops the dumps of databases the
@@ -271,3 +291,49 @@ flowchart TD
   uploaded once and the resulting `file_id` is reused per chat.
 - Each delivered backup carries a `🔖 Restore ID` in its caption, consumed by
   `restore --from-telegram`. See [LARGE_FILES.md](LARGE_FILES.md).
+
+---
+
+## Off-site copies
+
+One Go binary, `s3-sync` (minio-go, built into the image like `tg-upload`), does the
+work; `scripts/s3-env.sh` resolves and validates the `S3_*` settings and
+`scripts/lib/s3.sh` runs it and renders the metrics. It runs in one of two places:
+
+- **End of a backup run:** `backup.sh` calls `s3-sync sync` after retention.
+- **Uploader container** (`BACKUPGRAM_MODE=s3-sync`): go-cron runs `scripts/s3-sync.sh`
+  on `S3_SCHEDULE`. It takes a lock, runs one sync, writes the off-site metrics to
+  `METRICS_TEXTFILE_DIR` and exits `1` when the sync failed (so go-cron answers
+  `503` and the container shows unhealthy). It needs no database settings and no key,
+  and the backup folder can be mounted read-only.
+
+```mermaid
+flowchart TD
+    sync([s3-sync sync]) --> elig["eligible files<br/>stamped, regular, in last/ and daily/;<br/>no .part, -latest, directory dumps<br/>or (unless allowed) unencrypted files"]
+    elig --> list["list the bucket under S3_PREFIX"]
+    list --> plan["upload what is missing<br/>or has a different size"]
+    plan --> verify["stat: the bucket must report<br/>the local size"]
+    verify --> prune{S3_PRUNE?}
+    prune -->|TRUE| tiers["delete by the tiers<br/>(never the newest copy of a database<br/>that has a dump in last/)"]
+    prune -->|FALSE| status
+    tiers --> status["write the status file"]
+    status --> result{any upload or listing failed?}
+    result -->|no| ok([exit 0])
+    result -->|yes| fail([exit 1])
+```
+
+A key is `<S3_PREFIX>/<db>/<file name>`, one object per dump. The status file (a
+temp file, renamed into place) is two kinds of lines, from a listing taken after
+the uploads and the pruning:
+
+```
+result <ok|failed> <unix time finished>
+newest <db> <stamp unix time> <bytes> <key>        # one per database in the bucket
+```
+
+`lib/s3.sh` turns it into the `backupgram_offsite_*` metrics. `restore --from-s3`
+and `list --s3` use the same binary (`s3-sync latest`, `get` and `ls`): the object
+streams from the bucket into `gpg` and the restore, with nothing in clear text on
+disk. The dump names carry local time and the sync parses them in its own time zone,
+so the backup service and the uploader must share `TZ`. Settings, retention and
+disaster recovery: [OFFSITE.md](OFFSITE.md).

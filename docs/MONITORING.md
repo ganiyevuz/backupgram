@@ -77,6 +77,32 @@ A run that stops before any database is dumped (server unreachable, discovery fo
 nothing, low disk space) still writes the metrics, with `backupgram_run_success 0`
 and no per-database success series.
 
+### Off-site metrics
+
+With [off-site copies](OFFSITE.md) enabled (`S3_BUCKET`), four more series describe
+the bucket. They come from the status file of the last sync, so they show what the
+bucket holds, not what the local folder holds.
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `backupgram_offsite_last_timestamp_seconds` | `database` | When the newest dump of the database in the bucket was taken (Unix time) |
+| `backupgram_offsite_last_size_bytes` | `database` | Its size |
+| `backupgram_offsite_sync_success` | – | 1 when the last sync succeeded, 0 when an upload or the listing failed |
+| `backupgram_offsite_sync_timestamp_seconds` | – | When the last sync finished |
+
+- **Backup service with `S3_BUCKET`:** the series are appended to the run's metrics,
+  in both `.metrics.prom` (`GET /metrics`) and the textfile.
+- **Uploader (`BACKUPGRAM_MODE=s3-sync`):** it has no HTTP endpoint. It writes only the
+  four off-site series, after each sync, to `METRICS_TEXTFILE_DIR` as
+  `backupgram-offsite.prom`, or `backupgram-offsite-<project>.prom` when `PROJECT_NAME`
+  is set (beside the backup service's own `backupgram[-<project>].prom`). Without
+  `METRICS_TEXTFILE_DIR` it writes none. Give it the same `PROJECT_NAME` as the backup
+  service so the series carry the same `project` label.
+- With both a backup service holding `S3_BUCKET` and an uploader on one folder, both
+  export the same series: use one of the two.
+- A sync that could not write a status file reports only `backupgram_offsite_sync_success 0`,
+  timed now.
+
 ## Dashboard and alerts
 
 - Import `monitoring/grafana/backupgram.json` in Grafana (Dashboards → Import) and pick
@@ -89,3 +115,9 @@ and no per-database success series.
   `BackupgramLowDisk` (< 1 GiB) and `BackupgramScrapeDown` (HTTP scraping only: the
   target is down for 10 minutes; change `job="backupgram"` in the rule to your scrape
   job name). The age thresholds assume a daily `SCHEDULE`.
+- For [off-site copies](OFFSITE.md) the dashboard has a table, "Age of the newest
+  off-site dump", and the rules add `BackupgramOffsiteTooOld` (the newest off-site dump
+  of a database is older than 26 h: the local backup may be fine, the copy is not
+  keeping up) and `BackupgramOffsiteSyncFailed` (the last sync failed, for 30 minutes).
+  They only fire when the off-site series exist, and the 26 h threshold assumes a
+  daily backup.

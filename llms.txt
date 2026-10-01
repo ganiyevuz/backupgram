@@ -1,26 +1,28 @@
 # backupgram
 
-> A Docker image (Bash scripts plus two small Go binaries) that runs automated PostgreSQL backups on a cron
+> A Docker image (Bash scripts plus three small Go binaries) that runs automated PostgreSQL backups on a cron
 > schedule, with rotating retention, Telegram delivery (Bot API + MTProto),
 > optional GPG encryption, webhooks, multi-chat fan-out, auto-discovery of
 > databases, an optional HTTP REST control API, Prometheus metrics with a Grafana
-> dashboard, and built-in restore tooling.
+> dashboard, off-site copies to S3-compatible storage, and built-in restore tooling.
 > Published as `ganiyevuz/backupgram:<pg-version>[-alpine]`.
 
 ## Core Files
-- [scripts/init.sh]: ENTRYPOINT — validates config, then execs backupgram-api (REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE; it supervises go-cron) or go-cron directly with SCHEDULE
+- [scripts/init.sh]: ENTRYPOINT — validates config, then execs backupgram-api (REST_API_ENABLE=TRUE or METRICS_ENABLE=TRUE; it supervises go-cron) or go-cron directly with SCHEDULE; with BACKUPGRAM_MODE=s3-sync it validates only the S3 settings and execs go-cron with S3_SCHEDULE running scripts/s3-sync.sh (the off-site uploader)
 - [scripts/env.sh]: dual-purpose config — sourced for validation/var resolution, executed standalone at startup
 - [scripts/backup.sh]: the backup cycle — lock, then per database: dump into a .part file (streamed through GPG when encrypted), verify, rename, link, send to Telegram; then retention, metrics, summary; exits 0 / 1 / 75
 - [scripts/lib/]: helpers sourced by backup.sh — layout.sh (folders, links, retention), dump.sh (format detection, streaming dump, verification), discover.sh (database discovery), rls_guard.sh (row-level security checks), metrics.sh (Prometheus output)
-- [scripts/restore.sh]: restore tooling — interactive, by file, cross-database, or --from-telegram
+- [scripts/restore.sh]: restore tooling — interactive, by file, cross-database, --from-telegram, or --from-s3 (streams from the bucket)
+- [scripts/s3-env.sh, scripts/lib/s3.sh, scripts/s3-sync.sh]: off-site copies — s3-env.sh resolves (*_FILE wins) and validates the S3_* settings; lib/s3.sh runs s3-sync and renders the backupgram_offsite_* metrics from its status file; s3-sync.sh is the uploader mode's job (one sync + metrics, exits 1 when the sync failed)
 - [tg-upload/]: Go binary (gotd/td) for MTProto upload/download of files up to 2 GB
+- [s3-sync/]: Go module (minio-go) — the s3-sync binary: sync (upload what the bucket lacks, then prune by tiers), ls, get, latest; split into a storage interface and pure planning functions
 - [rest-api/]: Go module (net/http) for the optional REST control API; layered packages (httpx/config/backups/jobs/handlers/server/supervisor)
 - [monitoring/]: Grafana dashboard (grafana/backupgram.json) and Prometheus alert rules (prometheus/backupgram-alerts.yml)
-- [tests/]: scenario runner (scenarios.sh), local Docker harness (run-local.sh), Pharmakon-shaped PostgreSQL fixture (pharmakon/fixture.sh)
+- [tests/]: scenario runner (scenarios.sh), local Docker harness (run-local.sh; includes an S3 test server, RustFS), Pharmakon-shaped PostgreSQL fixture (pharmakon/fixture.sh)
 - [hooks/]: run-parts hooks (pre-backup | post-backup | error); 00-webhook implements WEBHOOK_* vars
 - [docker/debian.Dockerfile, docker/alpine.Dockerfile]: image definitions; kept in lockstep (identical ENV + symlinks)
 - [generate-docker-bake.sh]: source of truth for docker-bake.hcl (generated — do not hand-edit)
-- [.github/workflows/ci.yml]: vets/tests both Go modules, runs scripts against a live postgres:16, then builds/publishes images
+- [.github/workflows/ci.yml]: vets/tests all three Go modules, runs scripts against a live postgres:16, then builds/publishes images
 
 ## Documentation
 - [README.md]: quick start, environment variables, CLI commands, how backups work, hooks
@@ -30,6 +32,7 @@
 - [docs/CLI.md]: backup, restore, list, status, help with example output
 - [docs/ARCHITECTURE.md]: runtime chain, backup cycle, rotation model, format branches (C4 + mermaid)
 - [docs/MONITORING.md]: Prometheus metrics (textfile collector or GET /metrics), Grafana dashboard, alert rules
+- [docs/OFFSITE.md]: off-site copies to S3-compatible storage — both deployments, settings, retention and safety, providers, failures, disaster recovery
 - [docs/REST_API.md]: optional HTTP control surface — endpoints, bearer auth, runtime config editing
 - [docs/BUILD.md]: multi-arch build with QEMU + buildx
 - [docs/LARGE_FILES.md]: MTProto large-file (>50 MB, up to 2 GB) upload route
@@ -44,6 +47,7 @@
 - Row-level security guard: BACKUP_RLS_GUARD=TRUE checks each database before its dump (tables the login cannot read in full, or a restrictive policy limiting it) and fails the database, keeping its previous dump
 - Metrics: METRICS_TEXTFILE_DIR (node-exporter textfile) and/or METRICS_ENABLE (GET /metrics on REST_API_PORT, unauthenticated; metrics-only mode without REST_API_ENABLE); keep the port internal
 - Format branches: gzip SQL (.sql.gz, default), custom (-Fc), tar, directory (-Fd), cluster (pg_dumpall), each optionally GPG-wrapped (.gpg) except directory — kept in sync across backup.sh and restore.sh
+- Off-site copies (S3): S3_BUCKET + credentials (S3_*_FILE wins) sync every dump (stamped, encrypted .gpg files in last/ and daily/; no .part, -latest or directory dumps; unencrypted only with S3_ALLOW_UNENCRYPTED=TRUE) to <S3_PREFIX>/<db>/<file> at the end of a backup run, or a separate uploader (BACKUPGRAM_MODE=s3-sync, S3_SCHEDULE, backup folder mounted read-only, no POSTGRES_* and no key; pick one deployment per folder, one S3_PREFIX per server, the same TZ). An upload is verified by size and redone when the size differs; the bucket is pruned by S3_KEEP_DAYS/WEEKS/MONTHS tiers (default BACKUP_KEEP_*), never the newest copy of a database that has a dump in last/; S3_PRUNE=FALSE = upload only. Off-site problems never change a backup run's exit code; the uploader exits 1 after a failed sync. restore --from-s3 <db|key> streams from the bucket; list --s3 [db]; metrics backupgram_offsite_* and alerts BackupgramOffsiteTooOld / BackupgramOffsiteSyncFailed
 - Telegram transport: TELEGRAM_UPLOAD_METHOD = smart | botapi | mtproto; 50 MB Bot API limit enforced only against the official api.telegram.org
 - Multi-chat fan-out: comma-separated TELEGRAM_CHAT_ID; uploaded once, file_id reused per chat
 - Restore by message id: backups embed a 🔖 Restore ID in their caption; restore --from-telegram fetches and restores it
