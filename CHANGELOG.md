@@ -80,8 +80,8 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   `_MONTHS`, counted over every stamped dump) and never loses the newest copy of a
   database that still has a dump, and nothing is pruned while `last/` holds no dump (a
   new or wrong folder); `S3_PRUNE=FALSE` makes it upload only (for write-only
-  credentials and object lock). Each sync stops at `S3_SYNC_TIMEOUT` (default 3600 s)
-  and counts as failed, so a stalled endpoint holds up the backups (their lock) for at
+  credentials and object lock). Each sync stops at `S3_SYNC_TIMEOUT` (1 to 999999999
+  whole seconds, ASCII digits only; default 3600) and counts as failed, so a stalled endpoint holds up the backups (their lock) for at
   most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload); a
   backlog goes up newest first, so the newest copy arrives before the time limit. The
   uploader runs `go-cron` under `tini -s -g`, so `docker stop` stops a running sync

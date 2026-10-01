@@ -615,6 +615,17 @@ scenario_s3_settings_validated() {
   S3_SYNC_TIMEOUT="1000000000" run_startup_check
   expect_rc 1 "a time limit of ten digits"
   expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '1000000000')."
+  # A fullwidth 5: s3-sync refuses it, and so must the shell check in a UTF-8 locale, where
+  # [0-9] would match it (en_US.UTF-8 when this machine has it).
+  local utf8
+  utf8="$(grep -m1 -ixE 'en_US\.utf-?8' <<< "$(locale -a 2>/dev/null || true)" || true)"
+  if [ -n "${utf8}" ]; then
+    LC_ALL="${utf8}" S3_SYNC_TIMEOUT="５" run_startup_check
+  else
+    S3_SYNC_TIMEOUT="５" run_startup_check
+  fi
+  expect_rc 1 "a non-ASCII digit (locale: ${utf8:-default})"
+  expect_out "❌ S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '５')."
   # Off-site retention follows the container's own BACKUP_KEEP_*, never a REST API override of
   # them: with BACKUP_KEEP_DAYS=0 inherited, a 2–5-day-old dump would not even be uploaded.
   local old n

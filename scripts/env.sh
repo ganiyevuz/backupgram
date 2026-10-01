@@ -197,9 +197,10 @@ else
   echo "⚠️ Telegram credentials not provided. Telegram notifications disabled."
 fi
 
-# Unsigned integer settings
+# Unsigned integer settings. Digits are spelled out: in a UTF-8 locale [0-9] also matches
+# non-ASCII digits (٥, ５).
 for _uint_var in BACKUP_MIN_BYTES BACKUP_GID; do
-  if [ -n "${!_uint_var}" ] && ! [[ "${!_uint_var}" =~ ^[0-9]+$ ]]; then
+  if [ -n "${!_uint_var}" ] && ! [[ "${!_uint_var}" =~ ^[0123456789]+$ ]]; then
     echo "❌ ${_uint_var} must be a whole number (got '${!_uint_var}')." >&2
     exit 1
   fi

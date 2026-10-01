@@ -66,14 +66,15 @@ _s3_env() {
         ;;
     esac
   done
+  # Digits are spelled out: in a UTF-8 locale [0-9] also matches non-ASCII digits (٥, ５).
   for var in S3_KEEP_DAYS S3_KEEP_WEEKS S3_KEEP_MONTHS; do
-    if ! [[ "${!var}" =~ ^[0-9]+$ ]]; then
+    if ! [[ "${!var}" =~ ^[0123456789]+$ ]]; then
       _s3_problem="${var} must be a whole number (got '${!var}')."
       return 1
     fi
   done
-  # 1 to 9 digits, not all zeros: the values s3-sync accepts too.
-  if ! [[ "${S3_SYNC_TIMEOUT}" =~ ^[0-9]{1,9}$ && "${S3_SYNC_TIMEOUT}" =~ [1-9] ]]; then
+  # 1 to 9 ASCII digits, not all zeros: the values s3-sync accepts too.
+  if ! [[ "${S3_SYNC_TIMEOUT}" =~ ^[0123456789]{1,9}$ && "${S3_SYNC_TIMEOUT}" =~ [123456789] ]]; then
     _s3_problem="S3_SYNC_TIMEOUT must be a whole number of seconds from 1 to 999999999 (got '${S3_SYNC_TIMEOUT}')."
     return 1
   fi
