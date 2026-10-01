@@ -32,7 +32,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          cache-dependency-path: tg-upload/go.sum
+          cache-dependency-path: |
+            tg-upload/go.sum
+            s3-sync/go.sum
       - name: Vet and test the MTProto uploader
         working-directory: tg-upload
         run: |
@@ -42,6 +44,13 @@ jobs:
       - name: Vet and test the REST API server
         working-directory: rest-api
         run: |
+          go vet ./...
+          go test ./... -race
+
+      - name: Vet and test the off-site uploader
+        working-directory: s3-sync
+        run: |
+          test -z "$(gofmt -l .)"
           go vet ./...
           go test ./... -race
 

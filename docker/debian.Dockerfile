@@ -26,6 +26,17 @@ RUN GOARM="$(echo "${TARGETVARIANT}" | sed 's/^v//')" \
     GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
     go build -trimpath -ldflags="-s -w" -o /out/backupgram-api .
 
+# --- Build the off-site uploader (static, native cross-compile) ---
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS s3builder
+WORKDIR /src
+COPY s3-sync/go.mod s3-sync/go.sum ./
+RUN go mod download
+COPY s3-sync/ ./
+ARG TARGETOS TARGETARCH TARGETVARIANT
+RUN GOARM="$(echo "${TARGETVARIANT}" | sed 's/^v//')" \
+    GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w" -o /out/s3-sync .
+
 FROM postgres:$BASETAG
 
 ARG GOCRONVER=v0.0.11
@@ -116,6 +127,9 @@ ENV POSTGRES_DB="" \
 COPY --from=tgbuilder /out/tg-upload /usr/local/bin/tg-upload
 # REST API control server (built in the apibuilder stage)
 COPY --from=apibuilder /out/backupgram-api /usr/local/bin/backupgram-api
+
+# Off-site uploader (built in the s3builder stage)
+COPY --from=s3builder /out/s3-sync /usr/local/bin/s3-sync
 
 # Bake the shared default Telegram app credentials as a ROOT-ONLY file (0600),
 # deliberately NOT an ENV var — so it stays out of `docker inspect` and
