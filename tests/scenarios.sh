@@ -704,7 +704,7 @@ scenario_s3_restore_from_bucket() {
   s3_env
   # A prefix with "cluster" in it: only a file NAME may mark a pg_dumpall dump, never the s3:// path.
   export S3_PREFIX="cluster-copies"
-  local key
+  local key shims argv fds
   psql_su -d database -c "DROP TABLE IF EXISTS restore_probe" -c "CREATE TABLE restore_probe (id int)" \
     -c "INSERT INTO restore_probe SELECT generate_series(1, 42)"
   psql_su -d postgres -c "DROP DATABASE IF EXISTS restored_s3 WITH (FORCE)"
@@ -720,10 +720,48 @@ scenario_s3_restore_from_bucket() {
     RUN_RC=$?
     set -e
   }
-  run_restore --from-s3 database restored_s3
+  # Watch this restore: shims ahead of the real gpg and s3-sync on PATH log each call's arguments
+  # and where its stdin and stdout point (a pipe, or a file?), then run the real binary.
+  shims="$(mktemp -d)"
+  argv="${shims}/argv.log"
+  fds="${shims}/fds.log"
+  cat > "${shims}/shim" <<'SH'
+#!/bin/sh
+tool="$(basename "$0")"
+printf '%s\n' "${tool} $*" >> "${SHIM_ARGV}"
+printf '%s\n' "${tool} $1 in=$(readlink /proc/$$/fd/0 2>/dev/null) out=$(readlink /proc/$$/fd/1 2>/dev/null)" >> "${SHIM_FDS}"
+PATH="${PATH#"${SHIM_DIR}":}"
+exec "${tool}" "$@"
+SH
+  chmod +x "${shims}/shim"
+  ln -s shim "${shims}/gpg"
+  ln -s shim "${shims}/s3-sync"
+  PATH="${shims}:${PATH}" SHIM_DIR="${shims}" SHIM_ARGV="${argv}" SHIM_FDS="${fds}" \
+    run_restore --from-s3 database restored_s3
   expect_rc 0 "restore the newest off-site dump"
   [ "$(psql_su -d restored_s3 -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "rows from the newest dump"
   psql_su -d postgres -c "DROP DATABASE restored_s3 WITH (FORCE)"
+  # The newest dump was found, then fetched by its key alone, and gpg read the key from a file.
+  grep -qxF "s3-sync latest database" "${argv}" || fail "s3-sync latest was not called as expected:\n$(cat "${argv}")"
+  grep -qxF "s3-sync get ${key}" "${argv}" || fail "s3-sync get was not called with the key alone:\n$(cat "${argv}")"
+  [ "$(grep -c '^s3-sync get ' "${argv}")" = "1" ] || fail "s3-sync get ran more than once:\n$(cat "${argv}")"
+  grep -q '^gpg .*--decrypt .*--passphrase-file ' "${argv}" || fail "gpg was not called with --passphrase-file:\n$(cat "${argv}")"
+  # No clear text on disk: gpg never gets an output file, and nothing is passed an inline passphrase.
+  if grep -E -- ' (-o|--output)|--passphrase( |=|$)' "${argv}" >/dev/null; then
+    fail "a gpg or s3-sync call writes a file or takes the passphrase inline:\n$(cat "${argv}")"
+  fi
+  # The key and the S3 secret never reach a command line.
+  if grep -F -e "${TRICKY_KEY}" -e "${S3_SECRET_ACCESS_KEY}" "${argv}" "${fds}" >/dev/null; then
+    fail "a secret reached a command line:\n$(cat "${argv}")"
+  fi
+  # Both ends of the stream are pipes: the download and the decrypted bytes never go through a file.
+  if awk '/^s3-sync get / && !/ out=pipe:/ { bad = 1 } END { exit !bad }' "${fds}"; then
+    fail "s3-sync get writes to a file, not a pipe:\n$(cat "${fds}")"
+  fi
+  if awk '/^gpg / && !/ in=pipe:.* out=pipe:/ { bad = 1 } END { exit !bad }' "${fds}"; then
+    fail "gpg reads from or writes to a file, not a pipe:\n$(cat "${fds}")"
+  fi
+  rm -rf "${shims}"
   run_restore --from-s3 "${key}" restored_s3
   expect_rc 0 "restore a given key"
   [ "$(psql_su -d restored_s3 -tAc 'SELECT count(*) FROM restore_probe')" = "42" ] || fail "rows from the given key"
