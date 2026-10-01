@@ -42,8 +42,8 @@ if [ -z "${BACKUPGRAM_IMAGE}" ]; then
     --set alpine-latest.tags=backupgram-local:18-alpine \
     --set "alpine-latest.platform=linux/$(docker version -f '{{.Server.Arch}}')" --load)
 fi
-"${COMPOSE[@]}" up -d --build --wait db runner
-"${COMPOSE[@]}" up -d backup
+"${COMPOSE[@]}" up -d --build --wait db runner s3
+"${COMPOSE[@]}" up -d backup uploader
 in_runner "bash tests/pharmakon/fixture.sh"
 ALL_OUT=""
 
@@ -143,5 +143,44 @@ if grep -qF -- "${KEY}" <<< "${ALL_OUT}" || grep -qF -- "svc_pw" <<< "${ALL_OUT}
   fail "§10.8 a secret appears in the output or docker logs"
 fi
 ok "§10.8 no secret in docker logs or run output"
+
+# Off-site copies — the uploader beside the backup: no database, no key, a read-only folder.
+# shellcheck disable=SC2016  # expanded by the runner's bash, not here
+in_runner '
+  for i in $(seq 1 30); do
+    curl -sf -X PUT --aws-sigv4 "aws:amz:us-east-1:s3" --user testkey:testsecret123 http://s3:9000/platform-offsite >/dev/null && exit 0
+    sleep 1
+  done
+  exit 1
+' || fail "off-site: could not create the bucket"
+set +e
+OUT="$("${COMPOSE[@]}" exec -T uploader /scripts/s3-sync.sh 2>&1)"
+RC=$?
+set -e
+printf '%s\n' "${OUT}" | sed 's/^/    │ /'
+[ "${RC}" = "0" ] || fail "off-site: the uploader's sync exited ${RC}"
+has "☁️ Off-site s3://platform-offsite/platform-test: "
+# shellcheck disable=SC2016  # expanded by the runner's bash, not here
+in_runner '
+  set -e
+  export S3_BUCKET=platform-offsite S3_ENDPOINT=http://s3:9000 S3_FORCE_PATH_STYLE=TRUE S3_PREFIX=platform-test \
+    S3_ACCESS_KEY_ID=testkey S3_SECRET_ACCESS_KEY=testsecret123
+  keys="$(s3-sync ls | cut -f1)"
+  for f in /backups/last/*.dump.gpg; do
+    name="$(basename "$f")"
+    db="$(sed -E "s/-[0-9]{8}-[0-9]{6}\..*$//" <<< "${name}")"
+    grep -qxF "platform-test/${db}/${name}" <<< "${keys}" || { echo "missing off-site: ${name}"; exit 1; }
+  done
+' || fail "off-site: a database's newest dump is not in the bucket"
+"${COMPOSE[@]}" exec -T uploader sh -c 'command -v getent >/dev/null && ! getent hosts db' \
+  || fail "off-site: the uploader can resolve the database host"
+if "${COMPOSE[@]}" exec -T uploader sh -c 'touch /backups/.write-probe' >/dev/null 2>&1; then
+  fail "off-site: the uploader can write the backups"
+fi
+# Checked inside the container, so no value is ever printed.
+# shellcheck disable=SC2016  # expanded by the uploader's shell, not here
+"${COMPOSE[@]}" exec -T uploader sh -c '[ -z "${POSTGRES_PASSWORD}${POSTGRES_PASSWORD_FILE}${BACKUP_ENCRYPTION_KEY}" ]' \
+  || fail "off-site: the uploader holds a database password or the backup key"
+ok "off-site: every database's newest dump is in the bucket; the uploader has no database, no key, a read-only folder"
 
 echo "════ Pharmakon acceptance: all checks passed"

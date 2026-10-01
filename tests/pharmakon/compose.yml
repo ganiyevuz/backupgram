@@ -16,6 +16,7 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+    networks: [dbnet]
 
   runner:
     build:
@@ -34,6 +35,7 @@ services:
       - ../..:/work
       - backups:/backups
       - textfile:/textfile
+    networks: [dbnet, s3net]
 
   backup:
     image: ${BACKUPGRAM_IMAGE:-backupgram-local:18-alpine}
@@ -67,6 +69,51 @@ services:
       - backups:/backups
       - textfile:/textfile
       - ./10-manual-dir:/hooks/10-manual-dir:ro
+    networks: [dbnet]
+
+  # Off-site copies: an S3 server and the uploader beside the backup. The uploader has no
+  # database network, no key and a read-only /backups; it reaches only the S3 server.
+  s3:
+    image: rustfs/rustfs:1.0.0
+    environment:
+      RUSTFS_ACCESS_KEY: testkey
+      RUSTFS_SECRET_KEY: testsecret123
+    networks: [s3net]
+
+  uploader:
+    image: ${BACKUPGRAM_IMAGE:-backupgram-local:18-alpine}
+    pull_policy: never
+    depends_on:
+      s3: { condition: service_started }
+    environment:
+      BACKUPGRAM_MODE: s3-sync
+      S3_BUCKET: platform-offsite
+      S3_ENDPOINT: http://s3:9000
+      S3_FORCE_PATH_STYLE: "TRUE"
+      S3_PREFIX: platform-test
+      S3_ACCESS_KEY_ID_FILE: /run/secrets/s3_access_key_id
+      S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
+      S3_SCHEDULE: "0 0 1 1 *"          # the acceptance run triggers syncs by hand
+      TZ: Asia/Dubai
+      BACKUP_KEEP_DAYS: "7"
+      BACKUP_KEEP_WEEKS: "4"
+      BACKUP_KEEP_MONTHS: "3"
+      PROJECT_NAME: platform-test
+    secrets: [s3_access_key_id, s3_secret_access_key]
+    tmpfs: ["/tmp"]
+    volumes:
+      - backups:/backups:ro
+    networks: [s3net]
+
+networks:
+  dbnet: {}
+  s3net: {}
+
+secrets:
+  s3_access_key_id:
+    file: ./s3_access_key_id.test
+  s3_secret_access_key:
+    file: ./s3_secret_access_key.test
 
 volumes:
   backups:
