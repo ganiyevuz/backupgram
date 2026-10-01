@@ -124,14 +124,47 @@ TEST_S3_ENDPOINT="${TEST_S3_ENDPOINT:-http://127.0.0.1:9000}"
 TEST_S3_ACCESS_KEY="testkey"
 TEST_S3_SECRET_KEY="testsecret123"
 
+# The SHA-256 of stdin, in hex.
+sha256_hex() {
+  openssl dgst -sha256 | sed 's/^.*= //'
+}
+
+# The HMAC-SHA256 of $2 under the key $1 (key:<text> or hexkey:<hex>), in hex.
+hmac_sha256_hex() {
+  printf '%s' "$2" | openssl dgst -sha256 -mac HMAC -macopt "$1" | sed 's/^.*= //'
+}
+
+# Creates bucket $1 on the test server. The request is signed here (AWS Signature V4), not by
+# curl --aws-sigv4: the CI runner's curl (7.81, ubuntu-22.04) signs the host without its port
+# and sends no x-amz-content-sha256, and RustFS refuses both.
+s3_create_bucket() {
+  local host now day scope empty creq sts key part sig
+  host="${TEST_S3_ENDPOINT#*://}"
+  host="${host%%/*}"
+  now="$(date -u +%Y%m%dT%H%M%SZ)"
+  day="${now%%T*}"
+  scope="${day}/us-east-1/s3/aws4_request"
+  empty="$(printf '' | sha256_hex)"
+  creq="$(printf 'PUT\n/%s\n\nhost:%s\nx-amz-content-sha256:%s\nx-amz-date:%s\n\nhost;x-amz-content-sha256;x-amz-date\n%s' \
+    "$1" "${host}" "${empty}" "${now}" "${empty}")"
+  sts="$(printf 'AWS4-HMAC-SHA256\n%s\n%s\n%s' "${now}" "${scope}" "$(printf '%s' "${creq}" | sha256_hex)")"
+  key="$(hmac_sha256_hex "key:AWS4${TEST_S3_SECRET_KEY}" "${day}")"
+  for part in us-east-1 s3 aws4_request; do
+    key="$(hmac_sha256_hex "hexkey:${key}" "${part}")"
+  done
+  sig="$(hmac_sha256_hex "hexkey:${key}" "${sts}")"
+  curl -sf -X PUT -H "x-amz-date: ${now}" -H "x-amz-content-sha256: ${empty}" \
+    -H "Authorization: AWS4-HMAC-SHA256 Credential=${TEST_S3_ACCESS_KEY}/${scope}, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=${sig}" \
+    "${TEST_S3_ENDPOINT}/$1" >/dev/null
+}
+
 # Exports the S3_* settings for a fresh, empty bucket on the test server (prefix "test").
 # Retries for 30 s: the server may still be starting.
 s3_env() {
   local bucket i
   bucket="t$(date +%s%N)"
   for i in $(seq 1 30); do
-    if curl -sf -X PUT --aws-sigv4 "aws:amz:us-east-1:s3" \
-      --user "${TEST_S3_ACCESS_KEY}:${TEST_S3_SECRET_KEY}" "${TEST_S3_ENDPOINT}/${bucket}" >/dev/null; then
+    if s3_create_bucket "${bucket}"; then
       break
     fi
     [ "${i}" != "30" ] || fail "could not create bucket ${bucket} on ${TEST_S3_ENDPOINT}"
