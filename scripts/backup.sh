@@ -44,6 +44,10 @@ BACKUP_START_TIME=$(date +%s)
 prepare_backup_dir
 prepare_keyfile
 detect_dump_format
+# restore picks its method from the file name, so a tar dump needs a name ending in .tar.
+if [ "${DUMP_FORMAT}" = "tar" ] && [[ "${BACKUP_SUFFIX}" != *.tar ]]; then
+  echo "⚠️ POSTGRES_EXTRA_OPTS makes tar dumps (-Ft) but BACKUP_SUFFIX is '${BACKUP_SUFFIX}': end it in .tar so restore reads them as tar." >&2
+fi
 
 # Results per database, for the metrics
 BACKUP_SUCCESS=0

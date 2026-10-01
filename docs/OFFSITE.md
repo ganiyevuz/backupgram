@@ -436,9 +436,9 @@ encrypted (gpg's integrity check) or a `.sql.gz` (gzip's checksum). A restore th
 before it has read the whole object exits `1` with
 `❌ The restore stopped before it read the whole backup (see the errors above).`: that
 also catches an unencrypted custom-format object that `pg_restore` rejects before its
-end. A tar object is always read to its end (`pg_restore` never reads its tail), so
-damage in an unencrypted tar or plain `.sql` object shows only as `pg_restore` / `psql`
-errors in the output. A wrong key fails before anything is restored, but a download cut
+end. A `.tar` object is always read to its end (`pg_restore` never reads a tar
+archive's tail), so damage in an unencrypted `.tar` or plain `.sql` object shows only as
+`pg_restore` / `psql` errors in the output. A wrong key fails before anything is restored, but a download cut
 off part-way (or a damaged object) may already have restored part of the dump. If the
 restore created the target database, it drops it again. An existing target is left as it is and gets
 `⚠️ '<db>' may be partially restored: drop it before retrying.` Drop it (or restore

@@ -62,7 +62,7 @@ precedence over the plain variable.
 | `BACKUP_ON_START` | `FALSE` | Run a backup immediately on container start |
 | `VALIDATE_ON_START` | `TRUE` | Validate configuration on startup (runs `env.sh` standalone) |
 | `BACKUP_DIR` | `/backups` | Directory inside the container to store backups. Use one per server/configuration: retention and dropped-database pruning act on every file in it. |
-| `BACKUP_SUFFIX` | `.sql.gz` | Filename suffix for backup files |
+| `BACKUP_SUFFIX` | `.sql.gz` | Filename suffix for backup files (`.gpg` is added when encrypted). `restore` picks its method from the name: `.sql.gz` is gzip SQL, `.sql` plain SQL, `.tar` a tar archive (`-Ft`), and anything else is read as custom format. So `-Ft` dumps need a suffix ending in `.tar`; a backup run warns otherwise. |
 | `BACKUP_LATEST_TYPE` | `symlink` | How to create the `latest` pointer: `symlink`, `hardlink`, or `none` |
 | `BACKUP_KEEP_DAYS` | `7` | Days to retain daily backups |
 | `BACKUP_KEEP_WEEKS` | `4` | Weeks to retain weekly backups |

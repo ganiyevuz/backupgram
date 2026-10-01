@@ -85,15 +85,15 @@ files and directory dumps, which `pg_restore` reads itself. In a streamed restor
   checksum), encrypted or not.
 - A restore that stops before it has read the whole stream (`pg_restore` refusing the
   archive, a lost connection) exits `1` with `❌ The restore stopped before it read the
-  whole backup (see the errors above).` A tar archive is always read to its end
-  (`pg_restore` never reads its tail), so a tar dump that `pg_restore` refuses ends with
-  `⚠️ pg_restore completed with warnings.` instead.
+  whole backup (see the errors above).` A `.tar` dump is always read to its end
+  (`pg_restore` never reads a tar archive's tail), so one that `pg_restore` refuses ends
+  with `⚠️ pg_restore completed with warnings.` instead.
 - A wrong key fails before anything is restored; a damaged file can fail part-way. In
   each case, a target database the restore created is dropped again, and an existing one
   gets `⚠️ '<db>' may be partially restored: drop it before retrying.`
 
 Other damage shows only as `pg_restore` / `psql` errors in the output: in an
-unencrypted custom-format dump read from a local file, an unencrypted tar dump, or an
+unencrypted custom-format dump read from a local file, an unencrypted `.tar` dump, or an
 unencrypted plain `.sql` dump. (An unencrypted custom-format object from the bucket that
 `pg_restore` rejects before its end fails with the stopped-early line.)
 

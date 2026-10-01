@@ -176,13 +176,27 @@ scenario_retention_keeps_failing_database() {
 }
 
 scenario_formats_still_work() {
-  local opts
+  local opts suffix
+  local tar_warning="⚠️ POSTGRES_EXTRA_OPTS makes tar dumps (-Ft) but BACKUP_SUFFIX is"
   for opts in "-Z0" "-Z1" "-Z0 -Fd" "-Fc" "-Ft"; do
     fresh_backup_dir
-    POSTGRES_EXTRA_OPTS="${opts}" BACKUP_ENCRYPTION_KEY="k" run_backup
+    # restore tells a tar dump by its .tar name.
+    suffix=".sql.gz"
+    if [ "${opts}" = "-Ft" ]; then
+      suffix=".tar"
+    fi
+    POSTGRES_EXTRA_OPTS="${opts}" BACKUP_SUFFIX="${suffix}" BACKUP_ENCRYPTION_KEY="k" run_backup
     expect_rc 0 "format '${opts}' (encrypted when not a directory)"
     expect_count "${BACKUP_DIR}/daily" 'database-[0-9]*' 1
+    expect_no_out "${tar_warning}"
   done
+  # A tar dump under another suffix: restore would read it as custom format. The run warns
+  # once, and its exit code does not change.
+  fresh_backup_dir
+  POSTGRES_EXTRA_OPTS="-Ft" BACKUP_SUFFIX=".dump" BACKUP_ENCRYPTION_KEY="k" run_backup
+  expect_rc 0 "a tar dump named .dump"
+  expect_out "${tar_warning} '.dump': end it in .tar so restore reads them as tar."
+  [ "$(grep -cF -- "${tar_warning}" <<< "${RUN_OUT}")" = "1" ] || fail "the tar suffix warning is not printed exactly once"
   # The image default, clear text: -Z1 without a key is verified with gunzip -c on the .part.
   fresh_backup_dir
   POSTGRES_EXTRA_OPTS="-Z1" BACKUP_ENCRYPTION_KEY="" run_backup
@@ -192,6 +206,7 @@ scenario_formats_still_work() {
   POSTGRES_CLUSTER="TRUE" POSTGRES_EXTRA_OPTS="" BACKUP_ENCRYPTION_KEY="k" run_backup
   expect_rc 0 "encrypted cluster dump"
   only_file "${BACKUP_DIR}/last" 'cluster-[0-9]*.sql.gz.gpg' >/dev/null
+  expect_no_out "${tar_warning}"
 }
 
 scenario_pharmakon_discovery() {
