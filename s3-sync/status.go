@@ -11,14 +11,18 @@ import (
 // WriteStatus writes the sync's status file through a temp file and a rename:
 //
 //	result <ok|failed> <unix time finished>
+//	databases <n>                                 (the live databases; no line when databases < 0, unknown)
 //	newest <db> <stamp unix time> <bytes> <key>   (one per entry of newest; "0 0 -" for an empty Key)
-func WriteStatus(path string, ok bool, finished time.Time, newest []RemoteObject) error {
+func WriteStatus(path string, ok bool, finished time.Time, databases int, newest []RemoteObject) error {
 	result := "failed"
 	if ok {
 		result = "ok"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "result %s %d\n", result, finished.Unix())
+	if databases >= 0 {
+		fmt.Fprintf(&b, "databases %d\n", databases)
+	}
 	for _, o := range newest {
 		if o.Key == "" {
 			fmt.Fprintf(&b, "newest %s 0 0 -\n", o.DB)

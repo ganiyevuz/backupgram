@@ -139,11 +139,11 @@ func TestRunSyncStatusRoundTrip(t *testing.T) {
 	var out, errOut bytes.Buffer
 	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
 	path := filepath.Join(t.TempDir(), "status")
-	if err := WriteStatus(path, res.OK, at(2026, 11, 24, 12), res.Newest); err != nil {
+	if err := WriteStatus(path, res.OK, at(2026, 11, 24, 12), res.Databases, res.Newest); err != nil {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
-	if !strings.Contains(string(raw), "newest db ") || !strings.HasPrefix(string(raw), "result ok ") {
+	if !strings.Contains(string(raw), "\ndatabases 1\nnewest db ") || !strings.HasPrefix(string(raw), "result ok ") {
 		t.Errorf("status = %s", raw)
 	}
 }
@@ -160,7 +160,7 @@ func TestRunSyncSkipsPruneWithoutLocalDumps(t *testing.T) {
 	st.objects["p/gone/gone-20260910-040000.dump.gpg"] = make([]byte, 10) // expires
 	var out, errOut bytes.Buffer
 	res := RunSync(context.Background(), st, settings(), dir, at(2026, 11, 24, 12), &out, &errOut)
-	if !res.OK || res.Pruned != 0 {
+	if !res.OK || res.Pruned != 0 || res.Databases != 0 {
 		t.Fatalf("result %+v\nerr %s", res, errOut.String())
 	}
 	if len(st.objects) != 2 {
@@ -169,8 +169,32 @@ func TestRunSyncSkipsPruneWithoutLocalDumps(t *testing.T) {
 	if !strings.Contains(errOut.String(), "⚠️ off-site prune skipped: no dump in "+dir+"/last (a new or wrong folder?). Nothing deleted.") {
 		t.Errorf("stderr = %s", errOut.String())
 	}
+	if strings.Contains(errOut.String(), "⚠️ off-site: no dump in") {
+		t.Errorf("one warning per run, the prune-skipped one: %s", errOut.String())
+	}
 	if strings.Contains(out.String(), "removed") {
 		t.Errorf("out = %s", out.String())
+	}
+}
+
+// Without pruning, an empty or wrong folder still warns on every run, but is not a failure: a
+// new deployment has no dump before its first run. The count of 0 feeds the alert instead.
+func TestRunSyncWarnsWithoutLocalDumps(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "daily", "db-20261123-040000.dump.gpg"), 10)
+	st := newFake()
+	s := settings()
+	s.Prune = false
+	var out, errOut bytes.Buffer
+	res := RunSync(context.Background(), st, s, dir, at(2026, 11, 24, 12), &out, &errOut)
+	if !res.OK || res.Databases != 0 || res.Uploaded != 1 {
+		t.Fatalf("result %+v\nerr %s", res, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "⚠️ off-site: no dump in "+dir+"/last (a new or wrong folder?).\n") {
+		t.Errorf("stderr = %s", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "prune skipped") {
+		t.Errorf("pruning is off: %s", errOut.String())
 	}
 }
 

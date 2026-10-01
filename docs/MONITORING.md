@@ -79,9 +79,10 @@ and no per-database success series.
 
 ### Off-site metrics
 
-With [off-site copies](OFFSITE.md) enabled (`S3_BUCKET`), four more series describe
+With [off-site copies](OFFSITE.md) enabled (`S3_BUCKET`), five more series describe
 the bucket. They come from the status file of the last sync, so they show what the
-bucket holds, not what the local folder holds. The per-database series cover the
+bucket holds, not what the local folder holds (except `backupgram_offsite_databases`,
+which counts what the sync found to copy). The per-database series cover the
 databases with a dump in local `last/`, as the local `backupgram_backup_last_*` series
 do: a database that is gone from `last/` (dropped, excluded, no longer
 `CONNECT`-able) drops out even while its copies age out of the bucket, and a database
@@ -94,11 +95,12 @@ directory dumps) shows timestamp `0` and size `0`.
 | `backupgram_offsite_last_size_bytes` | `database` | Its size |
 | `backupgram_offsite_sync_success` | – | 1 when the last sync succeeded, 0 when an upload or the listing failed |
 | `backupgram_offsite_sync_timestamp_seconds` | – | When the last sync finished |
+| `backupgram_offsite_databases` | – | Databases with a dump in local `last/`, which the sync copies; `0` means an empty or wrong folder |
 
 - **Backup service with `S3_BUCKET`:** the series are appended to the run's metrics,
   in both `.metrics.prom` (`GET /metrics`) and the textfile.
 - **Uploader (`BACKUPGRAM_MODE=s3-sync`):** it has no HTTP endpoint. It writes only the
-  four off-site series, after each sync, to `METRICS_TEXTFILE_DIR` as
+  five off-site series, after each sync, to `METRICS_TEXTFILE_DIR` as
   `backupgram-offsite.prom`, or `backupgram-offsite-<project>.prom` when `PROJECT_NAME`
   is set (beside the backup service's own `backupgram[-<project>].prom`). Without
   `METRICS_TEXTFILE_DIR` it writes none. Give it the same `PROJECT_NAME` as the backup
@@ -108,6 +110,9 @@ directory dumps) shows timestamp `0` and size `0`.
 - A sync whose final listing failed, or that ended without writing its status file
   (stopped, or the file could not be written), reports `backupgram_offsite_sync_success 0`
   and no per-database series until the next good sync.
+- A sync that finds no dump in `last/` (a new deployment before its first dump, or an
+  uploader mounted on the wrong volume) is not a failed sync: it reports
+  `backupgram_offsite_databases 0` and no per-database series, and warns in its log.
 - Before the container's first sync (a fresh container whose first run aborted before
   the dumps) there are no off-site series at all.
 
@@ -126,7 +131,9 @@ directory dumps) shows timestamp `0` and size `0`.
 - For [off-site copies](OFFSITE.md) the dashboard has a table, "Age of the newest
   off-site dump", and the rules add `BackupgramOffsiteTooOld` (the newest off-site dump
   of a database is older than 26 h: the local backup may be fine, the copy is not
-  keeping up) and `BackupgramOffsiteSyncFailed` (the last sync failed, for 30 minutes).
-  They only fire when the off-site series exist, and the 26 h threshold assumes a
-  daily backup. A live database that never reaches the bucket has timestamp `0`, so
-  `BackupgramOffsiteTooOld` fires for it.
+  keeping up), `BackupgramOffsiteSyncFailed` (the last sync failed, for 30 minutes) and
+  `BackupgramOffsiteNoDatabases` (the sync has found no dump in `last/` for 26 h,
+  usually an uploader mounted on the wrong volume; a new deployment clears it with its
+  first dump). They only fire when the off-site series exist, and the 26 h thresholds
+  assume a daily backup. A live database that never reaches the bucket has timestamp
+  `0`, so `BackupgramOffsiteTooOld` fires for it.

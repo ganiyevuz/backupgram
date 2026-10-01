@@ -258,7 +258,10 @@ Safety rules on top:
   dropped": the sync prints `⚠️ off-site prune skipped: no dump in <dir>/last (a new or wrong folder?). Nothing deleted.`
   and only uploads. Pruning resumes once `last/` holds a dump, which is why a
   recovering server keeps `S3_PRUNE=FALSE` until its restore is verified
-  ([Disaster recovery](#disaster-recovery)).
+  ([Disaster recovery](#disaster-recovery)). Such a folder is not a failed sync, but it
+  shows: the sync warns on every run (with `S3_PRUNE=FALSE` too),
+  `backupgram_offsite_databases` reads `0` and `BackupgramOffsiteNoDatabases` fires
+  after 26 h; a new deployment clears it with its first dump.
 - A dump the tiers would delete straight away is not uploaded in the first place.
 - Objects that are not stamped dumps at `<S3_PREFIX>/<db>/<file>` are never touched.
 - A delete the server refuses is a warning, never a failure.
@@ -318,23 +321,29 @@ Log lines (the failures go to stderr):
 ⚠️ off-site: cannot list s3://my-backups/shop-prod (<reason>). It will be retried on the next run.
 ⚠️ off-site prune: could not delete <key> (<reason>).
 ⚠️ off-site prune skipped: no dump in /backups/last (a new or wrong folder?). Nothing deleted.
+⚠️ off-site: no dump in /backups/last (a new or wrong folder?).
 ⚠️ off-site: the sync stopped after 3600s (S3_SYNC_TIMEOUT). It will be retried on the next run.
 ⚠️ Off-site sync did not complete; the next run retries.
 ```
 
-The last line is the backup run's note when the sync failed. In uploader mode a run
+A folder with no dump in `last/` gets the `prune skipped` line, or with
+`S3_PRUNE=FALSE` the `no dump` line; neither fails the sync. The last line is the
+backup run's note when the sync failed. In uploader mode a run
 that finds the previous one still running prints `⏳ Another off-site sync is running. Not started.`
 and exits `0`; a sync that failed exits `1`, so the container shows unhealthy until
 the next good sync.
 
-Four metrics are added (`backupgram_offsite_last_timestamp_seconds`,
+Five metrics are added (`backupgram_offsite_last_timestamp_seconds`,
 `backupgram_offsite_last_size_bytes`, `backupgram_offsite_sync_success`,
-`backupgram_offsite_sync_timestamp_seconds`, details in [MONITORING.md](MONITORING.md)),
-and the alert rules gain two:
+`backupgram_offsite_sync_timestamp_seconds`, `backupgram_offsite_databases`, details in
+[MONITORING.md](MONITORING.md)), and the alert rules gain three:
 
 - `BackupgramOffsiteTooOld`: the newest off-site dump of a database is older than 26 h
   (the local backup may be fine; the copy is not keeping up).
 - `BackupgramOffsiteSyncFailed`: the last sync failed, for 30 minutes.
+- `BackupgramOffsiteNoDatabases`: the sync has found no dump in `last/` for 26 h, so
+  nothing reaches the bucket. Usually the uploader is mounted on the wrong volume (a
+  compose project prefix, a mistyped bind-mount path).
 
 The per-database series cover the databases with a dump in local `last/`, as the
 local `backupgram_backup_last_*` series do. A database whose dumps never reach the

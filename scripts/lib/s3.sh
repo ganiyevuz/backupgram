@@ -37,10 +37,11 @@ s3_sync() {
 # early abort then reports no off-site state rather than a failed sync). Each family's
 # HELP/TYPE comes right before its samples.
 render_offsite_metrics() {
-  local l result="" finished="" newest="" db stamp bytes
+  local l result="" finished="" databases="" newest="" db stamp bytes
   [ -r "${S3_STATUS_FILE}" ] || return 0
   l="project=\"$(prom_escape "${PROJECT_NAME}")\""
   read -r _ result finished < <(grep '^result ' "${S3_STATUS_FILE}" || true) || true
+  read -r _ databases < <(grep '^databases ' "${S3_STATUS_FILE}" || true) || true
   newest="$(grep '^newest ' "${S3_STATUS_FILE}" || true)"
   prom_header backupgram_offsite_last_timestamp_seconds "When the newest off-site dump of the database was taken (Unix time)."
   while read -r _ db stamp bytes _; do
@@ -62,6 +63,11 @@ render_offsite_metrics() {
   fi
   prom_header backupgram_offsite_sync_timestamp_seconds "When the last off-site sync finished (Unix time)."
   echo "backupgram_offsite_sync_timestamp_seconds{${l}} ${finished:-$(date +%s)}"
+  # 0 means an empty or wrong folder: nothing reaches the bucket (BackupgramOffsiteNoDatabases).
+  if [ -n "${databases}" ]; then
+    prom_header backupgram_offsite_databases "Databases with a dump in last/, which the off-site sync copies."
+    echo "backupgram_offsite_databases{${l}} ${databases}"
+  fi
 }
 
 # Uploader mode: the off-site metrics alone, to METRICS_TEXTFILE_DIR as

@@ -86,8 +86,11 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   uploaded. Off-site problems never change a backup run's exit code.
   `restore --from-s3 <db|key>` streams a dump from the bucket into the restore, and
   `list --s3 [db]` lists the bucket. New metrics `backupgram_offsite_*` (per database
-  with a dump in `last/`; timestamp `0` when the bucket holds none of its dumps), the
-  alerts `BackupgramOffsiteTooOld` and `BackupgramOffsiteSyncFailed`, and an off-site
+  with a dump in `last/`; timestamp `0` when the bucket holds none of its dumps;
+  `backupgram_offsite_databases` counts those databases), the alerts
+  `BackupgramOffsiteTooOld`, `BackupgramOffsiteSyncFailed` and
+  `BackupgramOffsiteNoDatabases` (no dump in `last/` for 26 h, usually an uploader
+  mounted on the wrong volume; the sync also warns on every such run), and an off-site
   age panel in the dashboard. See `docs/OFFSITE.md`.
 
 ## [2026.7.0] - 2026-07-10

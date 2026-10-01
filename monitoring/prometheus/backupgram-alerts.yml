@@ -75,3 +75,12 @@ groups:
         annotations:
           summary: "The last off-site sync for {{ $labels.project }} failed"
           description: "The next sync retries what is missing. Check the credentials, the endpoint and the bucket."
+
+      - alert: BackupgramOffsiteNoDatabases
+        # 26 h: time for a new deployment's first dump. Adjust to your schedule.
+        expr: backupgram_offsite_databases == 0
+        for: 26h
+        labels: { severity: warning }
+        annotations:
+          summary: "The off-site sync for {{ $labels.project }} finds no dump to copy"
+          description: "last/ in its backup folder holds no dump, so nothing reaches the bucket. Usually the uploader is mounted on the wrong volume (a compose project prefix, a mistyped bind-mount path). Check the sync's log."

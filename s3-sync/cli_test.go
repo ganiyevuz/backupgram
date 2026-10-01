@@ -101,8 +101,8 @@ func TestRunSyncStopsAtTheTimeLimit(t *testing.T) {
 	}
 }
 
-// The status file's newest lines cover the live databases only, and none when the bucket
-// could not be listed after the sync.
+// The status file counts the live databases, and its newest lines cover them only, none when
+// the bucket could not be listed after the sync.
 func TestRunSyncCommandNewestLines(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "last", "db-20261123-040000.dump.gpg"), 10)
@@ -120,6 +120,7 @@ func TestRunSyncCommandNewestLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "result ok 1795521600\n" +
+		"databases 2\n" +
 		"newest db 1795406400 10 p/db/db-20261123-040000.dump.gpg\n" +
 		"newest plain 0 0 -\n"
 	if string(raw) != want {
@@ -140,8 +141,8 @@ func TestRunSyncCommandNewestLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != "result failed 1795521600\n" {
-		t.Errorf("status after a failed final listing = %q, want no newest lines", raw)
+	if string(raw) != "result failed 1795521600\ndatabases 2\n" {
+		t.Errorf("status after a failed final listing = %q, want the count and no newest lines", raw)
 	}
 }
 

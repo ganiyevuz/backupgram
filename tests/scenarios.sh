@@ -651,6 +651,8 @@ scenario_s3_uploader_mode() {
   [ -z "$(find "${BACKUP_DIR}" -newer "${marker}" -print -quit)" ] || fail "the uploader wrote into BACKUP_DIR"
   promtool check metrics < "${dir}/backupgram-offsite-CI_Test.prom" || fail "promtool rejects the uploader's metrics"
   grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 1' "${dir}/backupgram-offsite-CI_Test.prom" || fail "success metric"
+  grep -qx 'backupgram_offsite_databases{project="CI Test"} 1' "${dir}/backupgram-offsite-CI_Test.prom" \
+    || fail "the uploader must count one database in last/:\n$(cat "${dir}/backupgram-offsite-CI_Test.prom")"
   S3_SECRET_ACCESS_KEY="wrong" METRICS_TEXTFILE_DIR="${dir}" run_uploader
   expect_rc 1 "the uploader fails on bad credentials"
   grep -qx 'backupgram_offsite_sync_success{project="CI Test"} 0' "${dir}/backupgram-offsite-CI_Test.prom" || fail "failure metric"
@@ -712,7 +714,7 @@ scenario_s3_prune_tiers() {
 scenario_s3_no_prune() {
   fresh_backup_dir
   s3_env
-  local old n
+  local old n dir
   mkdir -p "${BACKUP_DIR}/daily"
   for n in 40 41 42; do
     if [ "$(date -d "${n} days ago" +%d)" != 01 ]; then
@@ -721,12 +723,20 @@ scenario_s3_no_prune() {
     fi
   done
   head -c 1024 /dev/urandom > "${BACKUP_DIR}/daily/app-${old}.dump.gpg"
+  dir="$(mktemp -d)"
   S3_PRUNE="FALSE" run_uploader
   expect_rc 0 "first pass"
-  S3_PRUNE="FALSE" run_uploader
+  S3_PRUNE="FALSE" METRICS_TEXTFILE_DIR="${dir}" run_uploader
   expect_rc 0 "second pass"
   expect_no_out "removed"
   [ "$(s3_keys)" = "test/app/app-${old}.dump.gpg" ] || fail "an expired object was removed with S3_PRUNE=FALSE: $(s3_keys)"
+  # last/ holds no dump (a new or wrong folder): a warning on every run and a count of 0, which
+  # BackupgramOffsiteNoDatabases alerts on, but not a failed sync.
+  expect_out "⚠️ off-site: no dump in ${BACKUP_DIR}/last (a new or wrong folder?)."
+  grep -qx 'backupgram_offsite_databases{project="CI Test"} 0' "${dir}/backupgram-offsite-CI_Test.prom" \
+    || fail "an empty last/ must count 0 databases:\n$(cat "${dir}/backupgram-offsite-CI_Test.prom")"
+  promtool check metrics < "${dir}/backupgram-offsite-CI_Test.prom" || fail "promtool rejects the uploader's metrics"
+  rm -rf "${dir}"
 }
 
 scenario_s3_restore_from_bucket() {

@@ -17,13 +17,15 @@ type Settings struct {
 	AllowUnencrypted bool
 }
 
-// Result counts one sync's work. OK is false when an eligible upload failed or the
-// bucket could not be listed. Objects is the bucket's stamped dumps after the sync, and
-// Newest what the status file reports (see NewestLive); both are nil when the bucket could
-// not be listed after the sync.
+// Result counts one sync's work. OK is false when an eligible upload failed, the bucket
+// could not be listed or last/ could not be read. Databases is the number of live databases
+// (see LiveDatabases), -1 when last/ was not read. Objects is the bucket's stamped dumps
+// after the sync, and Newest what the status file reports (see NewestLive); both are nil
+// when the bucket could not be listed after the sync.
 type Result struct {
 	Uploaded, Present, Failed, Pruned int
 	OK                                bool
+	Databases                         int
 	Objects                           []RemoteObject
 	Newest                            []RemoteObject
 }
@@ -31,7 +33,7 @@ type Result struct {
 // RunSync uploads the dumps of dir the bucket lacks, prunes the bucket, and lists it
 // again for the status file.
 func RunSync(ctx context.Context, st Storage, s Settings, dir string, now time.Time, out, errOut io.Writer) Result {
-	res := Result{OK: true}
+	res := Result{OK: true, Databases: -1}
 	files, warnings, err := Eligible(dir, s.AllowUnencrypted)
 	if err != nil {
 		fmt.Fprintf(errOut, "⚠️ off-site: cannot read %s (%v).\n", dir, err)
@@ -43,15 +45,23 @@ func RunSync(ctx context.Context, st Storage, s Settings, dir string, now time.T
 	}
 	prune := s.Prune
 	live, err := LiveDatabases(dir)
+	if err == nil {
+		res.Databases = len(live)
+	}
 	switch {
 	case err != nil:
 		fmt.Fprintf(errOut, "⚠️ off-site: cannot read %s/last (%v); nothing pruned.\n", dir, err)
 		prune = false
+		res.OK = false
 	case prune && len(live) == 0:
 		// An empty or wrong folder is never "every database was dropped": on a new server
 		// that is restoring, pruning would delete the very copies being restored.
 		fmt.Fprintf(errOut, "⚠️ off-site prune skipped: no dump in %s/last (a new or wrong folder?). Nothing deleted.\n", dir)
 		prune = false
+	case len(live) == 0:
+		// Not a failure (a new deployment before its first dump); backupgram_offsite_databases
+		// reads 0 and its alert catches a wrong folder.
+		fmt.Fprintf(errOut, "⚠️ off-site: no dump in %s/last (a new or wrong folder?).\n", dir)
 	}
 	listing, err := st.List(ctx, ListPrefix(s.Prefix))
 	if err != nil {
