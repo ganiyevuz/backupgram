@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -72,6 +73,12 @@ func (m *minioStorage) Put(ctx context.Context, key, path string, size int64) er
 	}
 	defer f.Close()
 	_, err = m.c.PutObject(ctx, m.bucket, key, f, size, minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	if err != nil && ctx.Err() != nil {
+		// minio-go v7.3.0 aborts with this cancelled ctx (api-put-object-streaming.go): it never reaches the bucket.
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = m.c.RemoveIncompleteUpload(cctx, m.bucket, key)
+	}
 	return err
 }
 

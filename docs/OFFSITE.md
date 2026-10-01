@@ -170,7 +170,7 @@ Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (
 | `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers. Empty means the container's own `BACKUP_KEEP_*` (the image defaults `7` / `4` / `6` unless you set them), as the container was started with: a `BACKUP_KEEP_*` changed through the REST API does not change them. |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only; backupgram never deletes from the bucket. |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix. |
-| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (greater than 0). A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (greater than 0). A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. A sync stopped by the limit or by `SIGTERM` aborts its unfinished upload; one killed outright cannot, so set the bucket's lifecycle rule for incomplete multipart uploads ([Providers](#providers)). |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader. Uploader mode only. |
 | `BACKUPGRAM_MODE` | `backup` | `backup` or `s3-sync` (the uploader). |
 
@@ -295,6 +295,13 @@ or [SeaweedFS](https://github.com/seaweedfs/seaweedfs) (MinIO's community images
 no longer published). Create the bucket and an access key on it first; backupgram
 does not create buckets. Use `http://` only on a private network and `https://`
 across the internet. Garage's default region is `garage`.
+
+**Abort incomplete multipart uploads.** A dump over 16 MiB goes up in parts. A sync
+stopped by `S3_SYNC_TIMEOUT` or `SIGTERM` aborts its unfinished upload, but a sync
+killed outright (`SIGKILL`, a crash, the host going down) cannot: its parts stay in the
+bucket, invisible to `list --s3` and billed until they are removed. Set the provider's
+lifecycle rule "abort incomplete multipart uploads after N days" (1–7 days, for
+example).
 
 An `https://` endpoint whose certificate comes from a private CA: mount the CA
 certificate (PEM) in a folder and set `SSL_CERT_DIR` to that folder; `s3-sync` then
