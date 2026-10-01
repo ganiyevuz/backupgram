@@ -67,6 +67,9 @@ func (m *minioStorage) List(ctx context.Context, prefix string) ([]ObjectInfo, e
 }
 
 func (m *minioStorage) Put(ctx context.Context, key, path string, size int64) error {
+	if err := ctx.Err(); err != nil { // a stopped sync starts nothing, so it has nothing to abort
+		return err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -75,7 +78,7 @@ func (m *minioStorage) Put(ctx context.Context, key, path string, size int64) er
 	_, err = m.c.PutObject(ctx, m.bucket, key, f, size, minio.PutObjectOptions{ContentType: "application/octet-stream"})
 	if err != nil && ctx.Err() != nil {
 		// minio-go v7.3.0 aborts with this cancelled ctx (api-put-object-streaming.go): it never reaches the bucket.
-		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = m.c.RemoveIncompleteUpload(cctx, m.bucket, key)
 	}

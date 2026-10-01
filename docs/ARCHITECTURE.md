@@ -311,7 +311,8 @@ work; `scripts/s3-env.sh` resolves and validates the `S3_*` settings and
 
 Each sync stops at `S3_SYNC_TIMEOUT` (an hour by default; `SIGTERM` stops it too) and
 then counts as failed, so a stalled endpoint holds the backup's lock, or the
-uploader's, for at most `S3_SYNC_TIMEOUT`.
+uploader's, for at most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished
+upload; the uploads not yet started send nothing).
 
 ```mermaid
 flowchart TD
@@ -341,8 +342,9 @@ newest <db> 0 0 -                                  # ... when the bucket holds n
 
 There are no `newest` lines when that final listing failed. The `databases` line is a
 local count, written whenever `last/` was read (also after a failed listing or at the
-time limit); a sync that finds no dump there warns, `⚠️ off-site: no dump in …/last`,
-but does not fail, and the count of `0` feeds `BackupgramOffsiteNoDatabases`. `lib/s3.sh` deletes the
+time limit). A sync that finds no dump there warns (`⚠️ off-site prune skipped: …`, or
+with `S3_PRUNE=FALSE` `⚠️ off-site: no dump in …/last`) but does not fail, and the
+count of `0` feeds `BackupgramOffsiteNoDatabases`. `lib/s3.sh` deletes the
 status file before each sync, writes `result failed` itself when `s3-sync` ended without
 one, and turns it into the `backupgram_offsite_*` metrics (none before the container's
 first sync). `restore --from-s3`
