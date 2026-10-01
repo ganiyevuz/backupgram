@@ -166,8 +166,9 @@ run ends with exit code `1`. The lock is `${BACKUP_DIR}/.lock`, so runs of the s
 configuration — the scheduled run and a manual `docker exec … backup`, or two
 containers with the same settings on one volume — run one at a time; a busy run
 prints one line and exits `75` without changing anything. Every file of a run
-carries the run's start time. With `S3_BUCKET` set, the off-site sync runs after
-retention (even when every dump failed) and its result goes into the metrics; a
+carries the run's start time. With `S3_BUCKET` set, every run that reaches the dumps
+runs the off-site sync after retention (even when every dump failed; a run that
+aborts before the dumps does not sync), and its result goes into the metrics; a
 problem there is a warning and never changes the exit code.
 
 > **One `BACKUP_DIR` per server/configuration.** Retention prunes every backup file
@@ -300,12 +301,17 @@ One Go binary, `s3-sync` (minio-go, built into the image like `tg-upload`), does
 work; `scripts/s3-env.sh` resolves and validates the `S3_*` settings and
 `scripts/lib/s3.sh` runs it and renders the metrics. It runs in one of two places:
 
-- **End of a backup run:** `backup.sh` calls `s3-sync sync` after retention.
+- **End of a backup run:** `backup.sh` calls `s3-sync sync` after retention, in every
+  run that reaches the dumps.
 - **Uploader container** (`BACKUPGRAM_MODE=s3-sync`): go-cron runs `scripts/s3-sync.sh`
-  on `S3_SCHEDULE`. It takes a lock, runs one sync, writes the off-site metrics to
-  `METRICS_TEXTFILE_DIR` and exits `1` when the sync failed (so go-cron answers
-  `503` and the container shows unhealthy). It needs no database settings and no key,
-  and the backup folder can be mounted read-only.
+  on `S3_SCHEDULE`, independently of the backup runs. It takes a lock, runs one sync,
+  writes the off-site metrics to `METRICS_TEXTFILE_DIR` and exits `1` when the sync
+  failed (so go-cron answers `503` and the container shows unhealthy). It needs no
+  database settings and no key, and the backup folder can be mounted read-only.
+
+Each sync stops at `S3_SYNC_TIMEOUT` (an hour by default; `SIGTERM` stops it too) and
+then counts as failed, so a stalled endpoint never holds the backup's lock or the
+uploader's.
 
 ```mermaid
 flowchart TD
@@ -314,7 +320,7 @@ flowchart TD
     list --> plan["upload what is missing<br/>or has a different size"]
     plan --> verify["stat: the bucket must report<br/>the local size"]
     verify --> prune{S3_PRUNE?}
-    prune -->|TRUE| tiers["delete by the tiers<br/>(never the newest copy of a database<br/>that has a dump in last/)"]
+    prune -->|TRUE| tiers["delete by the tiers<br/>(never the newest copy of a database<br/>that has a dump in last/; nothing<br/>when last/ holds no dump)"]
     prune -->|FALSE| status
     tiers --> status["write the status file"]
     status --> result{any upload or listing failed?}
@@ -328,10 +334,14 @@ the uploads and the pruning:
 
 ```
 result <ok|failed> <unix time finished>
-newest <db> <stamp unix time> <bytes> <key>        # one per database in the bucket
+newest <db> <stamp unix time> <bytes> <key>        # one per database with a dump in last/
+newest <db> 0 0 -                                  # ... when the bucket holds none of its dumps
 ```
 
-`lib/s3.sh` turns it into the `backupgram_offsite_*` metrics. `restore --from-s3`
+There are no `newest` lines when that final listing failed. `lib/s3.sh` deletes the
+status file before each sync, writes `result failed` itself when `s3-sync` ended without
+one, and turns it into the `backupgram_offsite_*` metrics (none before the container's
+first sync). `restore --from-s3`
 and `list --s3` use the same binary (`s3-sync latest`, `get` and `ls`): the object
 streams from the bucket into `gpg` and the restore, with nothing in clear text on
 disk. The dump names carry local time and the sync parses them in its own time zone,

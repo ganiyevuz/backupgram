@@ -27,10 +27,12 @@ The off-site copy is added on top, and only dumps leave the server:
   dumps stay local unless you allow them (`S3_ALLOW_UNENCRYPTED`).
 - Each dump is one object at `<S3_PREFIX>/<db>/<file name>` (without the prefix and
   its `/` when `S3_PREFIX` is empty), for example `shop-prod/mydb/mydb-20260416-020000.sql.gz.gpg`.
-- A sync uploads what the bucket lacks, then prunes the bucket by the same tiers as
-  the local folders. The upload is checked: the bucket must report the local size, or
-  the upload counts as failed and is retried on the next sync. A key that exists with a
-  different size (an interrupted or replaced upload) is uploaded again.
+- A sync uploads what the bucket lacks, then prunes the bucket by tiers with the same
+  day counts as the local folders ([Retention and safety](#retention-and-safety)). The
+  upload is checked: the bucket must report the local size, or the upload counts as
+  failed and is retried on the next sync. A key that exists with a different size (an
+  interrupted or replaced upload) is uploaded again. Each sync has a time limit
+  (`S3_SYNC_TIMEOUT`), so a stalled endpoint never holds up the backups.
 - `list --s3` and `restore --from-s3` read straight from the bucket.
 
 Only an object at exactly `<S3_PREFIX>/<db>/<file>` with a stamped file name
@@ -47,8 +49,9 @@ Both run the same code. Pick one per backup folder (see [rules](#rules-for-a-saf
 ### a) At the end of a backup run
 
 Set `S3_BUCKET` and the credentials on the backup service. After retention, every
-run syncs the bucket. The sync runs even when every dump failed, so it can still
-upload dumps an earlier sync missed.
+run that reaches the dumps syncs the bucket; a run that stops before them (the
+database unreachable, too little disk space) does not. The sync runs even when every
+dump failed, so it can still upload dumps an earlier sync missed.
 
 ```yaml
 services:
@@ -89,7 +92,9 @@ volumes:
 `BACKUPGRAM_MODE=s3-sync` starts the same image as an uploader: it runs one sync on
 `S3_SCHEDULE` (default every 15 minutes) and does nothing else. It needs no
 `POSTGRES_*` settings, no `BACKUP_ENCRYPTION_KEY` and no database network, and the
-backup folder can be mounted read-only. The backup service stays as it was.
+backup folder can be mounted read-only. The backup service stays as it was. The
+uploader does not depend on the backup runs: it syncs what the folder holds on its own
+schedule, also while backups fail or stop early.
 
 ```yaml
 services:
@@ -102,6 +107,7 @@ services:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
       SCHEDULE: "@daily"
       BACKUP_ENCRYPTION_KEY: "${BACKUP_ENCRYPTION_KEY}"
+      PROJECT_NAME: shop                   # the same PROJECT_NAME on both services
       TZ: Europe/Berlin
     volumes:
       - backups:/backups
@@ -161,16 +167,18 @@ Metrics go to `METRICS_TEXTFILE_DIR` only; without it the uploader writes none (
 | `S3_SECRET_ACCESS_KEY` / `S3_SECRET_ACCESS_KEY_FILE` | `""` | Required when `S3_BUCKET` is set. The `_FILE` variant takes precedence. Never logged and never on a command line: `s3-sync` reads it from its environment. |
 | `S3_PREFIX` | `""` | Key prefix; leading and trailing `/` are trimmed. |
 | `S3_FORCE_PATH_STYLE` | `FALSE` | `TRUE` for path-style addressing (`https://host/bucket/key`), which most self-hosted S3 servers need. |
-| `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers. Empty means the container's own `BACKUP_KEEP_*` (the image defaults `7` / `4` / `6` unless you set them). |
+| `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers. Empty means the container's own `BACKUP_KEEP_*` (the image defaults `7` / `4` / `6` unless you set them), as the container was started with: a `BACKUP_KEEP_*` changed through the REST API does not change them. |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only; backupgram never deletes from the bucket. |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix. |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (greater than 0). A sync that reaches it stops, counts as failed and is retried on the next run (`⚠️ off-site: the sync stopped after …`). Raise it when large dumps go over a slow link: a 10 GB dump at 20 Mbit/s takes more than an hour. |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader. Uploader mode only. |
 | `BACKUPGRAM_MODE` | `backup` | `backup` or `s3-sync` (the uploader). |
 
 The settings are validated at startup and in each run (`❌ …` and exit `1`):
 `S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
-`FALSE`, `S3_KEEP_*` whole numbers, `S3_ENDPOINT` must start with `http://` or
-`https://`, `BACKUPGRAM_MODE` must be `backup` or `s3-sync`, and with `S3_BUCKET` set
+`FALSE`, `S3_KEEP_*` whole numbers, `S3_SYNC_TIMEOUT` a whole number of seconds
+greater than 0, `S3_ENDPOINT` must start with `http://` or `https://`,
+`BACKUPGRAM_MODE` must be `backup` or `s3-sync`, and with `S3_BUCKET` set
 both credentials must resolve to non-empty values (a `_FILE` that cannot be read is an
 error too). None of these settings can be changed through the REST API.
 
@@ -209,9 +217,10 @@ any name that is not `<db>-YYYYMMDD-HHMMSS<suffix>`.
   files, so they go up from `daily/` while they are there.
 - **`period` (default):** only `last/` holds stamped names. `daily/` keeps
   `<db>-YYYYMMDD…` names, which the sync does not take. A dump leaves `last/` after
-  `BACKUP_KEEP_MINS`, so a sync must run within that time of each backup. The inline
-  mode does (it runs at the end of the backup), and so does the default `S3_SCHEDULE`
-  (every 15 minutes) against the default `BACKUP_KEEP_MINS` (1440).
+  `BACKUP_KEEP_MINS`, so `BACKUP_KEEP_MINS` must be longer than a full backup run (the
+  inline sync runs after retention, at the end of the run) and longer than the
+  uploader's `S3_SCHEDULE` interval. Otherwise dumps leave `last/` before a sync sees
+  them and never go off-site. The defaults (1440 minutes, every 15 minutes) are fine.
 
 Directory-format dumps (`-Fd`) are not uploaded (`⚠️ <name>: directory dumps are not uploaded.`).
 Dumps without `.gpg` are not uploaded unless `S3_ALLOW_UNENCRYPTED=TRUE`
@@ -230,7 +239,13 @@ A dump is kept when its age, in whole days rounded down, is within one of:
 | weekly | the stamp is a Sunday | `S3_KEEP_WEEKS * 7 + 1` days |
 | monthly | the stamp is the 1st of a month | `S3_KEEP_MONTHS * 31 + 1` days |
 
-These are the same day counts as the local folders ([Retention Math](CONFIGURATION.md#retention-math)).
+These are the same day counts as the local folders ([Retention Math](CONFIGURATION.md#retention-math)),
+but the tiers count every stamped dump, as the `snapshot` layout does on disk. With
+the `period` layout the local folders keep one dump per day, ISO week and month, while
+the bucket keeps every run's dump: with an hourly `SCHEDULE`, 24 a day for
+`S3_KEEP_DAYS` days, and every run on a Sunday or the 1st for the longer tiers. Size
+`S3_KEEP_*` (or the lifecycle rule) for that.
+
 Safety rules on top:
 
 - **The newest copy of a database that still has a dump in `last/` is never
@@ -238,6 +253,12 @@ Safety rules on top:
   therefore keeps its newest off-site copy, as it does locally.
 - **A dropped database ages out.** Once it has no dump left in `last/`, its copies are
   pruned by the tiers like any other.
+- **A folder with no dump in `last/` prunes nothing.** A new server, or an uploader
+  mounted on the wrong (empty) volume, is never taken for "every database was
+  dropped": the sync prints `⚠️ off-site prune skipped: no dump in <dir>/last (a new or wrong folder?). Nothing deleted.`
+  and only uploads. Pruning resumes once `last/` holds a dump, which is why a
+  recovering server keeps `S3_PRUNE=FALSE` until its restore is verified
+  ([Disaster recovery](#disaster-recovery)).
 - A dump the tiers would delete straight away is not uploaded in the first place.
 - Objects that are not stamped dumps at `<S3_PREFIX>/<db>/<file>` are never touched.
 - A delete the server refuses is a warning, never a failure.
@@ -272,6 +293,12 @@ no longer published). Create the bucket and an access key on it first; backupgra
 does not create buckets. Use `http://` only on a private network and `https://`
 across the internet. Garage's default region is `garage`.
 
+An `https://` endpoint whose certificate comes from a private CA: mount the CA
+certificate (PEM) in a folder and set `SSL_CERT_DIR` to that folder; `s3-sync` then
+trusts it besides the public CAs. `SSL_CERT_FILE` works too, but replaces the public
+CAs for every tool in the container (Telegram delivery included), so point it at a
+bundle that holds both.
+
 ---
 
 ## Failures and monitoring
@@ -290,6 +317,8 @@ Log lines (the failures go to stderr):
 ⚠️ mydb: off-site upload failed (<reason>). It will be retried on the next run.
 ⚠️ off-site: cannot list s3://my-backups/shop-prod (<reason>). It will be retried on the next run.
 ⚠️ off-site prune: could not delete <key> (<reason>).
+⚠️ off-site prune skipped: no dump in /backups/last (a new or wrong folder?). Nothing deleted.
+⚠️ off-site: the sync stopped after 3600s (S3_SYNC_TIMEOUT). It will be retried on the next run.
 ⚠️ Off-site sync did not complete; the next run retries.
 ```
 
@@ -307,6 +336,13 @@ and the alert rules gain two:
   (the local backup may be fine; the copy is not keeping up).
 - `BackupgramOffsiteSyncFailed`: the last sync failed, for 30 minutes.
 
+The per-database series cover the databases with a dump in local `last/`, as the
+local `backupgram_backup_last_*` series do. A database whose dumps never reach the
+bucket (unencrypted while `S3_ALLOW_UNENCRYPTED=FALSE`, or directory dumps) shows
+timestamp `0`, so `BackupgramOffsiteTooOld` fires for it instead of staying silent. A
+database that is gone from `last/` (dropped, excluded, no longer `CONNECT`-able) drops
+out of the series even while its copies age out of the bucket.
+
 ---
 
 ## Disaster recovery
@@ -315,7 +351,11 @@ The server is gone; the bucket and your `BACKUP_ENCRYPTION_KEY` remain.
 
 1. On a new server, start the image with the database settings of the new PostgreSQL
    (`POSTGRES_*`), the S3 settings (`S3_BUCKET`, `S3_ENDPOINT`, credentials and the
-   same `S3_PREFIX`) and `BACKUP_ENCRYPTION_KEY`.
+   same `S3_PREFIX`), `BACKUP_ENCRYPTION_KEY` and **`S3_PRUNE=FALSE`**. Keep pruning
+   off until the restore is verified, then remove `S3_PRUNE=FALSE`: the first dump of
+   a still-empty database would become its protected newest copy, and the tiers could
+   then delete the older copies you are about to restore. (Or do not start the
+   scheduled service yet and restore through a one-off container, as below.)
 2. See what the bucket holds. This works in any container with the S3 settings, the
    uploader included:
 
@@ -335,9 +375,15 @@ The server is gone; the bucket and your `BACKUP_ENCRYPTION_KEY` remain.
    An argument with a `/` is a key; anything else is a database name.
 
 The restore streams the object from the bucket through `gpg` into `pg_restore` /
-`psql`: nothing in clear text is written to disk, and a wrong key or a damaged object
-exits `1` with `❌ Could not read the backup …`. A database or key the bucket does not
-hold exits `1` with `❌ <name>: not found in s3://<bucket>/<prefix>.`
+`psql`: nothing in clear text is written to disk. A database or key the bucket does
+not hold exits `1` with `❌ <name>: not found in s3://<bucket>/<prefix>.`
+
+A stream that fails exits `1` with `❌ Could not read the backup (download interrupted, wrong BACKUP_ENCRYPTION_KEY, or a damaged object).`
+A wrong key fails before anything is restored, but a download cut off part-way (or a
+damaged object) may already have restored part of the dump. If the restore created
+the target database, it drops it again. An existing target is left as it is and gets
+`⚠️ '<db>' may be partially restored: drop it before retrying.` Drop it (or restore
+under another name) before you retry.
 
 A restore needs database access, so run it in the backup service or in a one-off
 container with the same settings (`docker compose run --rm --entrypoint restore backup --from-s3 mydb`),

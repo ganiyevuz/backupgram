@@ -160,8 +160,8 @@ secrets) variants that take precedence over the plain value. The most common:
 | `BACKUP_ENCRYPTION_KEY` | `""` | GPG passphrase (enables AES-256 encryption) |
 | `METRICS_TEXTFILE_DIR` / `METRICS_ENABLE` | `""` / `FALSE` | Prometheus metrics: a textfile for node-exporter, and/or `GET /metrics` on `REST_API_PORT` |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | `""` | Telegram delivery (chat id list = fan-out) |
-| `S3_BUCKET` / `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | `""` / AWS / `""` / `""` | Off-site copies to S3-compatible storage (credentials also as `*_FILE`); `BACKUPGRAM_MODE=s3-sync` runs a separate uploader |
 | `TELEGRAM_USE_DEFAULT_API` | `TRUE` | Use the image's built-in shared app for large-file (2 GB) upload; set `FALSE` to require your own `TELEGRAM_API_ID`/`TELEGRAM_API_HASH` |
+| `S3_BUCKET` / `S3_ENDPOINT` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | `""` / AWS / `""` / `""` | Off-site copies to S3-compatible storage (credentials also as `*_FILE`); `BACKUPGRAM_MODE=s3-sync` runs a separate uploader |
 
 See the **[Configuration Reference](docs/CONFIGURATION.md)** for the complete list.
 

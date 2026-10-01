@@ -284,7 +284,7 @@ for endpoints, the runtime-config whitelist, and the security model.
 
 | Variable | Default | Description |
 |---|---|---|
-| `S3_BUCKET` | `""` | Enables off-site copies: every backup run ends with a sync of the bucket. Required when `BACKUPGRAM_MODE=s3-sync`. |
+| `S3_BUCKET` | `""` | Enables off-site copies: every backup run that reaches the dumps ends with a sync of the bucket (a separate uploader instead syncs on its own schedule, whatever the backup runs do). Required when `BACKUPGRAM_MODE=s3-sync`. |
 | `S3_ENDPOINT` | `https://s3.amazonaws.com` | Scheme, host and optional port of any S3-compatible endpoint (`https://host:port`), no path. `http://` is allowed, for a private network. |
 | `S3_REGION` | `us-east-1` | Region of the bucket |
 | `S3_ACCESS_KEY_ID` / `S3_ACCESS_KEY_ID_FILE` | `""` | Required when `S3_BUCKET` is set; the `_FILE` variant wins |
@@ -294,14 +294,18 @@ for endpoints, the runtime-config whitelist, and the security model.
 | `S3_KEEP_DAYS` / `S3_KEEP_WEEKS` / `S3_KEEP_MONTHS` | `BACKUP_KEEP_DAYS` / `_WEEKS` / `_MONTHS` | Remote retention tiers; empty inherits the container's `BACKUP_KEEP_*` |
 | `S3_PRUNE` | `TRUE` | `FALSE` = upload only, never delete from the bucket |
 | `S3_ALLOW_UNENCRYPTED` | `FALSE` | `TRUE` also uploads dumps without a `.gpg` suffix |
+| `S3_SYNC_TIMEOUT` | `3600` | Time limit of one sync, in whole seconds (> 0); a sync that reaches it stops, counts as failed and is retried on the next run. Raise it when large dumps go over a slow link. |
 | `S3_SCHEDULE` | `*/15 * * * *` | Cron expression of the uploader (`BACKUPGRAM_MODE=s3-sync` only) |
 | `BACKUPGRAM_MODE` | `backup` | `backup` (the backup service) or `s3-sync` (a separate uploader container) |
 
 `env.sh` and the uploader's startup check validate these and exit `1` on a bad value:
 `S3_FORCE_PATH_STYLE`, `S3_PRUNE` and `S3_ALLOW_UNENCRYPTED` must be `TRUE` or
-`FALSE`, `S3_KEEP_*` whole numbers, `S3_ENDPOINT` must start with `http://` or
-`https://`, and with `S3_BUCKET` set both credentials must resolve to non-empty
-values. None of them is in the REST API's runtime-config whitelist. The two
+`FALSE`, `S3_KEEP_*` whole numbers, `S3_SYNC_TIMEOUT` a whole number of seconds
+greater than 0, `S3_ENDPOINT` must start with `http://` or `https://`, and with
+`S3_BUCKET` set both credentials must resolve to non-empty values. None of them is in
+the REST API's runtime-config whitelist, and empty `S3_KEEP_*` inherit the
+`BACKUP_KEEP_*` the container was started with, never a value changed through the
+REST API. The two
 deployments (at the end of a backup run, or a separate uploader), the retention
 rules and the disaster-recovery steps are in [OFFSITE.md](OFFSITE.md).
 

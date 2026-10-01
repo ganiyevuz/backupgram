@@ -42,8 +42,10 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   through the decryption pipe), and only then renamed into place. Leftover `.part`
   files are removed by the next run.
 - `restore` exits 1 with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
-  damaged file).` when an encrypted dump cannot be decrypted, and restores nothing.
-  The target name derived from the file name also strips a trailing `.dump`.
+  damaged file).` when an encrypted dump cannot be decrypted. When the stream fails
+  part-way, a target database the restore created is dropped again, and an existing
+  one gets `⚠️ '<db>' may be partially restored: drop it before retrying.` The target
+  name derived from the file name also strips a trailing `.dump`.
 - `BACKUP_LATEST_TYPE=hardlink` pointed the `-latest` link at a path relative to the
   working directory.
 - Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer
@@ -70,19 +72,23 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - Off-site copies to S3-compatible storage (AWS S3, Hetzner, Backblaze B2, Wasabi,
   Cloudflare R2, or RustFS/Garage/SeaweedFS on another machine), in addition to the
   local folders. Set `S3_BUCKET` and credentials (also as `S3_*_FILE` secrets) to sync
-  at the end of every backup run, or run a separate uploader container with
-  `BACKUPGRAM_MODE=s3-sync` and `S3_SCHEDULE`, which needs no database access, no key
-  and a read-only backup folder. Dumps go to `<S3_PREFIX>/<db>/<file>`, are checked
-  against their local size and re-uploaded when it differs; the bucket is pruned by the
-  same tiers as the disk (`S3_KEEP_DAYS` / `_WEEKS` / `_MONTHS`) and never loses the
-  newest copy of a database that still has a dump; `S3_PRUNE=FALSE` makes it upload
-  only (for write-only credentials and object lock). Unencrypted dumps stay local
-  unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are not uploaded. Off-site
-  problems never change a backup run's exit code. `restore --from-s3 <db|key>` streams
-  a dump from the bucket into the restore, and `list --s3 [db]` lists the bucket. New
-  metrics `backupgram_offsite_*`, the alerts `BackupgramOffsiteTooOld` and
-  `BackupgramOffsiteSyncFailed`, and an off-site age panel in the dashboard. See
-  `docs/OFFSITE.md`.
+  at the end of every backup run that reaches the dumps, or run a separate uploader
+  container with `BACKUPGRAM_MODE=s3-sync` and `S3_SCHEDULE`, which needs no database
+  access, no key and a read-only backup folder. Dumps go to `<S3_PREFIX>/<db>/<file>`,
+  are checked against their local size and re-uploaded when it differs; the bucket is
+  pruned by tiers with the same day counts as the disk (`S3_KEEP_DAYS` / `_WEEKS` /
+  `_MONTHS`, counted over every stamped dump) and never loses the newest copy of a
+  database that still has a dump, and nothing is pruned while `last/` holds no dump (a
+  new or wrong folder); `S3_PRUNE=FALSE` makes it upload only (for write-only
+  credentials and object lock). Each sync stops at `S3_SYNC_TIMEOUT` (default 3600 s)
+  and counts as failed, so a stalled endpoint never holds up the backups. Unencrypted
+  dumps stay local unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are not
+  uploaded. Off-site problems never change a backup run's exit code.
+  `restore --from-s3 <db|key>` streams a dump from the bucket into the restore, and
+  `list --s3 [db]` lists the bucket. New metrics `backupgram_offsite_*` (per database
+  with a dump in `last/`; timestamp `0` when the bucket holds none of its dumps), the
+  alerts `BackupgramOffsiteTooOld` and `BackupgramOffsiteSyncFailed`, and an off-site
+  age panel in the dashboard. See `docs/OFFSITE.md`.
 
 ## [2026.7.0] - 2026-07-10
 

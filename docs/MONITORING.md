@@ -81,7 +81,12 @@ and no per-database success series.
 
 With [off-site copies](OFFSITE.md) enabled (`S3_BUCKET`), four more series describe
 the bucket. They come from the status file of the last sync, so they show what the
-bucket holds, not what the local folder holds.
+bucket holds, not what the local folder holds. The per-database series cover the
+databases with a dump in local `last/`, as the local `backupgram_backup_last_*` series
+do: a database that is gone from `last/` (dropped, excluded, no longer
+`CONNECT`-able) drops out even while its copies age out of the bucket, and a database
+with no copy in the bucket (unencrypted dumps while `S3_ALLOW_UNENCRYPTED=FALSE`,
+directory dumps) shows timestamp `0` and size `0`.
 
 | Metric | Labels | Meaning |
 |---|---|---|
@@ -100,8 +105,11 @@ bucket holds, not what the local folder holds.
   service so the series carry the same `project` label.
 - With both a backup service holding `S3_BUCKET` and an uploader on one folder, both
   export the same series: use one of the two.
-- A sync that could not write a status file reports only `backupgram_offsite_sync_success 0`,
-  timed now.
+- A sync whose final listing failed, or that ended without writing its status file
+  (stopped, or the file could not be written), reports `backupgram_offsite_sync_success 0`
+  and no per-database series until the next good sync.
+- Before the container's first sync (a fresh container whose first run aborted before
+  the dumps) there are no off-site series at all.
 
 ## Dashboard and alerts
 
@@ -120,4 +128,5 @@ bucket holds, not what the local folder holds.
   of a database is older than 26 h: the local backup may be fine, the copy is not
   keeping up) and `BackupgramOffsiteSyncFailed` (the last sync failed, for 30 minutes).
   They only fire when the off-site series exist, and the 26 h threshold assumes a
-  daily backup.
+  daily backup. A live database that never reaches the bucket has timestamp `0`, so
+  `BackupgramOffsiteTooOld` fires for it.

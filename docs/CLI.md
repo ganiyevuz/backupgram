@@ -59,7 +59,8 @@ including `Backup completed in …`, goes to stdout.
 The `error` hook does not run for a failed database, so alert on the exit code or
 on the [metrics](MONITORING.md).
 
-With `S3_BUCKET` set, the run ends with an [off-site sync](OFFSITE.md). A problem there
+With `S3_BUCKET` set, every run that reaches the dumps ends with an [off-site
+sync](OFFSITE.md); a run that stops before them does not sync. A problem there
 (`⚠️ …` lines, `backupgram_offsite_sync_success 0`) never changes the exit code.
 
 ---
@@ -77,7 +78,10 @@ Encrypted dumps stream into the restore (custom-format, `.sql` and `.sql.gz`):
 nothing is decrypted to disk, and the key is passed through a temporary passphrase
 file, never on a command line. A wrong `BACKUP_ENCRYPTION_KEY` or a damaged file
 exits `1` with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
-damaged file).` and restores nothing.
+damaged file).` A wrong key fails before anything is restored; a damaged file can
+fail part-way. Either way, a target database the restore created is dropped again,
+and an existing one gets `⚠️ '<db>' may be partially restored: drop it before
+retrying.`
 
 ```sh
 # Interactive mode -- pick from a numbered list
@@ -124,9 +128,13 @@ docker exec -it my-backup restore --from-s3 shop-prod/mydb/mydb-20260416-020000.
 
 The object streams from the bucket through `gpg` into the restore: nothing in clear
 text is written to disk. Exit `1` when the database or key is not found in the bucket
-(`❌ <name>: not found in s3://<bucket>/<prefix>.`) or when the dump cannot be read
-(`❌ Could not read the backup …`, a wrong key or a damaged object); nothing is
-restored then.
+(`❌ <name>: not found in s3://<bucket>/<prefix>.`, nothing restored) or when the
+stream fails (`❌ Could not read the backup (download interrupted, wrong
+BACKUP_ENCRYPTION_KEY, or a damaged object).`). A wrong key fails before anything is
+restored, but a download cut off part-way may already have restored part of the dump:
+a target database the restore created is then dropped again, and an existing one is
+left with `⚠️ '<db>' may be partially restored: drop it before retrying.` Drop it, or
+restore under another name, before you retry.
 
 ### Interactive mode output
 
@@ -212,9 +220,12 @@ Available:  45G
 ### Off-site list output
 
 `list --s3` prints one box per database with each object's size, dump time, the
-retention tier that keeps it (`daily`, `weekly`, `monthly`, or `expires` when only the
-newest-copy rule keeps it) and its key. An object that is not a stamped dump at
-`<S3_PREFIX>/<db>/<file>` shows `-` for the dump time and the tier. It needs
+retention tier that keeps it (`daily`, `weekly` or `monthly`) and its key, in key
+order. `expires` means past every tier: the next sync deletes it unless it is the
+newest copy of a database that still has a dump in `last/` (and nothing is deleted
+with `S3_PRUNE=FALSE`). An object that is not a stamped dump at
+`<S3_PREFIX>/<db>/<file>` shows `-` for the dump time and the tier; `list --s3 <db>`
+leaves such objects out. It needs
 `S3_BUCKET` and its credentials, and no database access, so it also runs in the
 uploader. Exit `1` when the bucket cannot be listed.
 
@@ -222,8 +233,8 @@ uploader. Exit `1` when the bucket cannot be listed.
 ╔══════════════════════════════════════╗
 ║  OFF-SITE mydb
 ╠══════════════════════════════════════╣
-║  42.0M   2026-04-16 02:00:00  daily    shop-prod/mydb/mydb-20260416-020000.sql.gz.gpg
 ║  41.0M   2026-04-12 02:00:00  weekly   shop-prod/mydb/mydb-20260412-020000.sql.gz.gpg
+║  42.0M   2026-04-16 02:00:00  daily    shop-prod/mydb/mydb-20260416-020000.sql.gz.gpg
 ╚══════════════════════════════════════╝
 
 2 off-site dump(s) in s3://my-backups/shop-prod
