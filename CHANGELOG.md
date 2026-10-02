@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Image tags track the bundled PostgreSQL major version (15–18); project releases
 are tagged separately using CalVer (`YYYY.M.PATCH`).
 
-## [Unreleased]
+## [2026.10.0] - 2026-10-01
 
 ### Breaking
 - `backup` exits **75** when another run holds the lock, and **1** when any database
@@ -33,6 +33,60 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   BACKUP_ENCRYPTION_KEY must be a single line …`): gpg reads only the first line of
   the passphrase file, so the rest of such a key was silently ignored.
 
+### Added
+- **Off-site copies to S3-compatible storage** (AWS S3, Hetzner, Backblaze B2, Wasabi,
+  Cloudflare R2, or RustFS/Garage/SeaweedFS on another machine), in addition to the
+  local folders. See `docs/OFFSITE.md`.
+  - Two ways to run it: set `S3_BUCKET` and its credentials (also as `S3_*_FILE`
+    secrets) to sync at the end of every backup run that reaches the dumps, or run a
+    separate uploader container (`BACKUPGRAM_MODE=s3-sync`, `S3_SCHEDULE`) that needs
+    no database access, no key and only a read-only backup folder.
+  - Dumps go to `<S3_PREFIX>/<db>/<file>`, are checked against their local size and
+    uploaded again when it differs. A backlog goes up newest first. Unencrypted dumps
+    stay local unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are not uploaded.
+  - The bucket is pruned by tiers with the same day counts as the disk (`S3_KEEP_DAYS` /
+    `_WEEKS` / `_MONTHS`, counted over every stamped dump). It never loses the newest
+    copy of a database that still has a dump, and nothing is pruned while `last/` holds
+    no dump (a new or wrong folder). `S3_PRUNE=FALSE` uploads only, for write-only
+    credentials and object lock.
+  - Each sync stops at `S3_SYNC_TIMEOUT` (1 to 999999999 seconds, default 3600) and
+    counts as failed, so a stalled endpoint holds up the backups (their lock) for at
+    most that long, plus up to 5 seconds to abort an unfinished upload.
+  - Off-site problems never change a backup run's exit code. A bad S3 setting stops the
+    container from starting; one that breaks later (an unreadable secret file) turns the
+    off-site copies off with a warning and a failed sync, never the local backups.
+  - The uploader runs `go-cron` under `tini -s -g`, so `docker stop` ends a running sync
+    cleanly: it aborts its upload and records a failed sync. A backup container is
+    unchanged: `docker stop` waits for a running backup up to the stop timeout with
+    `go-cron` as PID 1, and ends it after about 5 s with `backupgram-api` as PID 1
+    (REST API or metrics on); a sync still running then is killed outright.
+  - `restore --from-s3 <db|key>` streams a dump from the bucket into the restore, and
+    `list --s3 [db]` lists the bucket.
+  - Metrics `backupgram_offsite_*` (per database with a dump in `last/`; timestamp `0`
+    when the bucket holds none of its dumps; `backupgram_offsite_databases` counts those
+    databases), the alerts `BackupgramOffsiteTooOld`, `BackupgramOffsiteSyncFailed` and
+    `BackupgramOffsiteNoDatabases` (no dump in `last/` for 26 h, usually an uploader
+    mounted on the wrong volume; the sync also warns on every such run), and an off-site
+    age panel in the dashboard.
+- **Prometheus metrics** (`METRICS_TEXTFILE_DIR`, `METRICS_ENABLE` → `GET /metrics`), a
+  Grafana dashboard and alert rules under `monitoring/` (backup too old, missed twice,
+  database failed, run failed, dump shrank, low disk, scrape down).
+  `METRICS_ENABLE=TRUE` without `REST_API_ENABLE` runs a metrics-only server (`/healthz`
+  and `/metrics`, no token). `/metrics` is unauthenticated and lists database names:
+  keep `REST_API_PORT` on an internal network. See `docs/MONITORING.md`.
+- `POSTGRES_DB_INCLUDE` — glob patterns for auto-discovered databases (also changeable
+  through the REST API); databases the login may not `CONNECT` to are skipped and logged.
+- `BACKUP_RLS_GUARD` — refuses a dump that row-level security would silently cut short.
+- `BACKUP_LAYOUT=snapshot` — timestamped names in every folder, weekly on Sundays,
+  monthly on the 1st, `last/` holds exactly the newest dump of each existing database.
+  A dropped database's dump and its `-latest` entry leave `last/`; its `daily/`,
+  `weekly/` and `monthly/` copies stay until retention removes them.
+- `BACKUP_MIN_BYTES` — a dump smaller than this is rejected and the previous one kept
+  (an empty dump always is).
+- `BACKUP_GID` — group for the backup folders (setgid, `2750`) and files (`0640`).
+- A backup run warns when `-Ft` dumps get a `BACKUP_SUFFIX` that does not end in
+  `.tar`: `restore` picks its method from the file name.
+
 ### Fixed
 - Encryption no longer writes an unencrypted dump to disk first: `pg_dump` is piped into
   GPG. The key is passed through a temporary passphrase file, never the command line
@@ -41,23 +95,26 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
   are verified in full (custom/tar/directory with `pg_restore`, gzip with `gunzip`,
   through the decryption pipe), and only then renamed into place. Leftover `.part`
   files are removed by the next run.
-- `restore` exits 1 with `❌ Could not read the backup (wrong BACKUP_ENCRYPTION_KEY or a
-  damaged file).` when the backup cannot be read: an encrypted dump that does not
-  decrypt, or a damaged `.sql.gz`, encrypted or not (gzip's checksum). A streamed
-  restore that stops before it has read the whole backup (`pg_restore` refusing the
-  archive, a lost connection) exits 1 with `❌ The restore stopped before it read the
-  whole backup (see the errors above).` instead of reporting success. In each case a
-  target database the restore created is dropped again, and an existing one gets
-  `⚠️ '<db>' may be partially restored: drop it before retrying.` Both apply to streamed
-  restores: everything except local unencrypted custom-format and tar files and directory
-  dumps. A streamed `.tar` dump is read to its end, since `pg_restore` never reads a tar
-  archive's tail; `restore` picks its method from the name, so a backup run warns when
-  `-Ft` dumps get a `BACKUP_SUFFIX` that does not end in `.tar`. Damage in a local
-  unencrypted custom-format file, any unencrypted `.tar` dump, or an unencrypted plain
-  `.sql` dump still shows only as `pg_restore` / `psql` errors; an unencrypted
-  custom-format object from the bucket that `pg_restore` rejects before its end fails
-  with the stopped-early line. The target name derived from the file name also strips a
-  trailing `.dump`.
+- `restore` no longer reports success for a backup it could not read in full:
+  - An encrypted dump that does not decrypt, or a damaged `.sql.gz` (gzip's checksum),
+    encrypted or not, exits 1 with `❌ Could not read the backup (wrong
+    BACKUP_ENCRYPTION_KEY or a damaged file).`
+  - A restore that stops before it has read the whole backup (`pg_restore` refusing the
+    archive, a lost connection) exits 1 with `❌ The restore stopped before it read the
+    whole backup (see the errors above).`
+  - In both cases a target database the restore created is dropped again, and an
+    existing one gets `⚠️ '<db>' may be partially restored: drop it before retrying.`
+  - Both checks apply to streamed restores: everything except local unencrypted
+    custom-format and tar files and directory dumps. Damage in a local unencrypted
+    custom-format file, any unencrypted `.tar` dump, or an unencrypted plain `.sql`
+    dump still shows only as `pg_restore` / `psql` errors; an unencrypted custom-format
+    object from the bucket that `pg_restore` rejects before its end fails with the
+    stopped-early line.
+  - A streamed `.tar` dump is read to its end, since `pg_restore` never reads a tar
+    archive's tail.
+  - The target name derived from the file name also strips a trailing `.dump`.
+- Whole-number settings accept ASCII digits only: under the image's UTF-8 locale a
+  digit such as `５` passed the check and failed later.
 - `BACKUP_LATEST_TYPE=hardlink` pointed the `-latest` link at a path relative to the
   working directory.
 - Glob characters in `POSTGRES_EXTRA_OPTS` / `POSTGRES_EXCLUDE_TABLES` are no longer
@@ -65,54 +122,6 @@ are tagged separately using CalVer (`YYYY.M.PATCH`).
 - `list`, `status` and `GET /backups` ignore dot files (`.part`, `.lock`, metrics).
 - `restore` and `list --cleanup-preview` run as the CLI commands (`docker exec … restore`)
   found no `env.sh` next to their `/usr/local/bin` symlink: `restore` failed at once.
-
-### Added
-- `POSTGRES_DB_INCLUDE` — glob patterns for auto-discovered databases (also changeable
-  through the REST API); databases the login may not `CONNECT` to are skipped and logged.
-- `BACKUP_RLS_GUARD` — refuses a dump that row-level security would silently cut short.
-- `BACKUP_LAYOUT=snapshot` — timestamped names in every folder, weekly on Sundays,
-  monthly on the 1st, `last/` holds exactly the newest dump of each existing database.
-  A dropped database's dump and its `-latest` entry leave `last/`; its `daily/`,
-  `weekly/` and `monthly/` copies stay until retention removes them.
-- `BACKUP_MIN_BYTES`, `BACKUP_GID`.
-- Prometheus metrics (`METRICS_TEXTFILE_DIR`, `METRICS_ENABLE` → `GET /metrics`), a
-  Grafana dashboard and alert rules under `monitoring/` (backup too old, missed twice,
-  database failed, run failed, dump shrank, low disk, scrape down). `METRICS_ENABLE=TRUE`
-  without `REST_API_ENABLE` runs a metrics-only server (`/healthz` and `/metrics`, no token).
-  `/metrics` is unauthenticated and lists database names: keep `REST_API_PORT` on an
-  internal network. See `docs/MONITORING.md`.
-- Off-site copies to S3-compatible storage (AWS S3, Hetzner, Backblaze B2, Wasabi,
-  Cloudflare R2, or RustFS/Garage/SeaweedFS on another machine), in addition to the
-  local folders. Set `S3_BUCKET` and credentials (also as `S3_*_FILE` secrets) to sync
-  at the end of every backup run that reaches the dumps, or run a separate uploader
-  container with `BACKUPGRAM_MODE=s3-sync` and `S3_SCHEDULE`, which needs no database
-  access, no key and a read-only backup folder. Dumps go to `<S3_PREFIX>/<db>/<file>`,
-  are checked against their local size and re-uploaded when it differs; the bucket is
-  pruned by tiers with the same day counts as the disk (`S3_KEEP_DAYS` / `_WEEKS` /
-  `_MONTHS`, counted over every stamped dump) and never loses the newest copy of a
-  database that still has a dump, and nothing is pruned while `last/` holds no dump (a
-  new or wrong folder); `S3_PRUNE=FALSE` makes it upload only (for write-only
-  credentials and object lock). Each sync stops at `S3_SYNC_TIMEOUT` (1 to 999999999
-  whole seconds, ASCII digits only; default 3600) and counts as failed, so a stalled endpoint holds up the backups (their lock) for at
-  most `S3_SYNC_TIMEOUT` (plus up to 5 seconds to abort an unfinished upload); a
-  backlog goes up newest first, so the newest copy arrives before the time limit. The
-  uploader runs `go-cron` under `tini -s -g`, so `docker stop` stops a running sync
-  cleanly (it aborts its upload and records a failed sync). Backup mode is unchanged:
-  `docker stop` waits for a running backup up to the stop timeout with `go-cron` as
-  PID 1, and ends it after about 5 s with `backupgram-api` as PID 1 (REST API or
-  metrics on); a sync still running then is killed outright.
-  Unencrypted dumps stay local unless `S3_ALLOW_UNENCRYPTED=TRUE`; directory dumps are
-  not uploaded. Off-site problems never change a backup run's exit code; a bad S3
-  setting refuses to start, and one that breaks later (an unreadable secret file) turns
-  the off-site copies off with a warning and a failed sync, never the local backups.
-  `restore --from-s3 <db|key>` streams a dump from the bucket into the restore, and
-  `list --s3 [db]` lists the bucket. New metrics `backupgram_offsite_*` (per database
-  with a dump in `last/`; timestamp `0` when the bucket holds none of its dumps;
-  `backupgram_offsite_databases` counts those databases), the alerts
-  `BackupgramOffsiteTooOld`, `BackupgramOffsiteSyncFailed` and
-  `BackupgramOffsiteNoDatabases` (no dump in `last/` for 26 h, usually an uploader
-  mounted on the wrong volume; the sync also warns on every such run), and an off-site
-  age panel in the dashboard. See `docs/OFFSITE.md`.
 
 ## [2026.7.0] - 2026-07-10
 
